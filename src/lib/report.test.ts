@@ -1,12 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildReportSystemPrompt,
   buildReportUserPrompt,
   extractJson,
-  generateReport,
   parseReport,
   sanitizeReport,
-  type ReportLlm,
 } from "./report";
 import type { ChatMessage } from "./types";
 
@@ -14,18 +12,6 @@ const sampleMessages: ChatMessage[] = [
   { id: "1", role: "assistant", content: "请自我介绍", createdAt: 1 },
   { id: "2", role: "user", content: "我是张三，5 年产品经验", createdAt: 2 },
 ];
-
-function fakeLlm(output: string | ((attempt: number) => string)): ReportLlm {
-  let calls = 0;
-  const fn = typeof output === "function" ? output : () => output;
-  return {
-    complete: vi.fn(async () => {
-      const result = fn(calls);
-      calls += 1;
-      return result;
-    }),
-  };
-}
 
 describe("extractJson", () => {
   it("提取裸 JSON", () => {
@@ -108,65 +94,21 @@ describe("parseReport", () => {
   });
 });
 
-describe("generateReport", () => {
-  it("成功路径返回报告", async () => {
-    const llm = fakeLlm('{"summary":"不错"}');
-    const report = await generateReport({
-      resume: "",
-      questionCount: 8,
-      messages: sampleMessages,
-      llm,
-    });
-    expect(report?.summary).toBe("不错");
-  });
-
-  it("解析失败自动重试一次成功", async () => {
-    const llm = fakeLlm((attempt: number) =>
-      attempt === 0 ? "抱歉我输出错了" : '{"summary":"重试成功"}'
-    );
-    const report = await generateReport({
-      resume: "",
-      questionCount: 8,
-      messages: sampleMessages,
-      llm,
-    });
-    expect(report?.summary).toBe("重试成功");
-  });
-
-  it("多次失败返回 null", async () => {
-    const llm = fakeLlm("全是杂音没有 JSON");
-    const report = await generateReport({
-      resume: "",
-      questionCount: 8,
-      messages: sampleMessages,
-      llm,
-      maxAttempts: 2,
-    });
-    expect(report).toBeNull();
-  });
-
-  it("LLM 抛错且重试后仍抛错则向上抛", async () => {
-    const llm: ReportLlm = {
-      complete: vi.fn().mockRejectedValue(new Error("network down")),
-    };
-    await expect(
-      generateReport({
-        resume: "",
-        questionCount: 8,
-        messages: sampleMessages,
-        llm,
-        maxAttempts: 2,
-      })
-    ).rejects.toThrow("report llm call failed");
-  });
-});
-
 describe("prompt 组装", () => {
   it("system prompt 含简历与规则", () => {
     const p = buildReportSystemPrompt("张三简历", 10);
     expect(p).toContain("张三简历");
     expect(p).toContain("10");
     expect(p).toContain("improvements");
+  });
+
+  it("超长简历被截断（控制 token）", () => {
+    const longResume = "工作经历".repeat(800); // 3200 字
+    const p = buildReportSystemPrompt(longResume, 10);
+    // 截断后 prompt 里出现省略号，且不含简历结尾
+    expect(p).toContain("…");
+    const resumePortion = p.slice(p.indexOf("【候选人简历】"), p.indexOf("目标题量"));
+    expect(resumePortion.length).toBeLessThan(2200);
   });
 
   it("user prompt 含完整实录", () => {

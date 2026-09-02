@@ -15,18 +15,18 @@ export const INTERVIEW_RULES = `【面试规则 - 必须严格遵守】
 6. 如果用户答得简短或跑题，追问一次帮助聚焦，不要评判。
 7. 你的输出只是你要说的那一句话，不要带任何编号、前缀或解释。`;
 
-/** 开场白模板（无简历时用） */
-export const OPENING_WITHOUT_RESUME =
-  "你好，我是今天的产品经理面试官。我们开始吧——请先做个自我介绍。";
+/** 简历放进 system prompt 的最大长度（每轮请求都会携带，截断控制 token） */
+export const RESUME_PROMPT_MAX_CHARS = 2000;
 
 /**
  * 根据请求参数构建 system prompt。
- * @param resume 简历文本（可为空）
+ * @param resume 简历文本（可为空，超长自动截断）
  * @param questionCount 目标题量（决定节奏提示）
  */
 export function buildSystemPrompt(resume: string, questionCount: number): string {
-  const resumeBlock = resume.trim()
-    ? `【候选人简历】\n${resume.trim()}\n（提问时应优先基于简历内容深入追问，但要自然，不要生硬复述简历。）`
+  const trimmed = resume.trim();
+  const resumeBlock = trimmed
+    ? `【候选人简历】\n${truncateResume(trimmed)}\n（提问时应优先基于简历内容深入追问，但要自然，不要生硬复述简历。）`
     : "【候选人简历】\n（空。候选人未提供简历，请从自我介绍开始自然展开。）";
 
   return [
@@ -35,6 +35,11 @@ export function buildSystemPrompt(resume: string, questionCount: number): string
     INTERVIEW_RULES,
     `本场面试的目标题量约为 ${questionCount} 题，请控制节奏，避免问太多细节导致拖沓。`,
   ].join("\n\n");
+}
+
+/** 简历截断（超过上限时省略结尾） */
+function truncateResume(resume: string, maxChars = RESUME_PROMPT_MAX_CHARS): string {
+  return resume.length > maxChars ? resume.slice(0, maxChars) + "…" : resume;
 }
 
 /**
@@ -59,9 +64,4 @@ export function buildMessagesForHistory(
     result.push({ role: "user", content: userMessage });
   }
   return result;
-}
-
-/** 简历极简摘要（用于 report 的上下文，控制 token） */
-export function summarizeResumeForPrompt(resume: string, maxChars = 2000): string {
-  return resume.length > maxChars ? resume.slice(0, maxChars) + "…" : resume;
 }

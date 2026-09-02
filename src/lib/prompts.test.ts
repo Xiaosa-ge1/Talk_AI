@@ -14,6 +14,15 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("自我介绍");
     expect(p).not.toContain("候选人简历】\n张三");
   });
+
+  it("超长简历被截断（每轮 system prompt 都携带，控制 token）", () => {
+    const longResume = "项目经历".repeat(600); // 2400 字 > 2000 上限
+    const p = buildSystemPrompt(longResume, 8);
+    expect(p).toContain("…");
+    // 简历部分（截取到规则文本之前）应明显短于原文
+    const resumeSection = p.slice(p.indexOf("【候选人简历】"), p.indexOf("【面试规则"));
+    expect(resumeSection.length).toBeLessThan(2100);
+  });
 });
 
 describe("buildMessagesForHistory", () => {

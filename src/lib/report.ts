@@ -1,29 +1,23 @@
 import type { ChatMessage, DimensionKey, InterviewReport } from "./types";
 
 /**
- * 报告生成逻辑（服务端 + 测试共用）：
- * 1. 组装 system prompt 要求 LLM 输出严格 JSON
- * 2. 调用 LlmClient（非流式一次性返回）
- * 3. 解析 JSON，失败自动重试一次，再失败返回错误（由 route 降级）
+ * 报告生成逻辑（服务端 API route 使用）：
+ * 1. 组装 system prompt 要求 LLM 输出严格 JSON（简历截断控制 token）
+ * 2. 解析 LLM 输出为结构化报告（容错：围栏/杂音/缺字段/score 越界）
+ * 注意：LLM 调用与重试逻辑在 /api/report route 内（SSE 流式），本文件只含纯函数。
  */
 
-export interface ReportLlm {
-  complete(messages: Array<{ role: "system" | "user"; content: string }>): Promise<string>;
+/** 简历放进 prompt 前的最大长度（控制每轮/报告调用的 token） */
+export const RESUME_PROMPT_MAX_CHARS = 2000;
+
+function truncateResume(resume: string, maxChars = RESUME_PROMPT_MAX_CHARS): string {
+  return resume.length > maxChars ? resume.slice(0, maxChars) + "…" : resume;
 }
 
-export const REPORT_SCHEMA_HINT =
-  "请严格输出一个 JSON 对象（不要输出任何其他文字、不要用 markdown 代码块包裹），结构如下：" +
-  '{ "summary": "一句话总评（鼓励优先，30-60 字）", ' +
-  '"dimensions": [ { "key": "logic", "label": "表达逻辑", "score": 1-5, "comment": "一句话点评" }, ' +
-  '{ "key": "depth", "label": "专业深度", "score": 1-5, "comment": "一句话点评" }, ' +
-  '{ "key": "data", "label": "数据思维", "score": 1-5, "comment": "一句话点评" }, ' +
-  '{ "key": "agility", "label": "应变能力", "score": 1-5, "comment": "一句话点评" } ], ' +
-  '"improvements": [ { "question": "被问的问题", "yourAnswer": "你的回答（截断至 100 字）", ' +
-  '"issue": "问题说明", "suggestion": "改进建议/参考思路" } ], ' +
-  '"highlight": { "question": "问题", "quote": "你说得好的原话片段", "praise": "为什么好" } }';
-
 export function buildReportSystemPrompt(resume: string, questionCount: number): string {
-  const resumeBlock = resume.trim() ? "【候选人简历】\n" + resume.trim() : "（候选人未提供简历）";
+  const resumeBlock = resume.trim()
+    ? "【候选人简历】\n" + truncateResume(resume.trim())
+    : "（候选人未提供简历）";
   return (
     "你是一位资深的产品经理面试官兼教练。请为下面这场面试生成一份客观、鼓励优先的复盘报告。\n\n" +
     "【规则】\n" +
@@ -148,42 +142,4 @@ export function parseReport(raw: string): InterviewReport | null {
   } catch {
     return null;
   }
-}
-
-/**
- * 生成报告：最多尝试 maxAttempts 次解析。
- * 每次重试会要求 LLM「只输出 JSON」。全部失败返回 null（route 据此降级为文本）。
- */
-export async function generateReport(params: {
-  resume: string;
-  questionCount: number;
-  messages: ChatMessage[];
-  llm: ReportLlm;
-  maxAttempts?: number;
-}): Promise<InterviewReport | null> {
-  const resume = params.resume;
-  const questionCount = params.questionCount;
-  const messages = params.messages;
-  const llm = params.llm;
-  const maxAttempts = params.maxAttempts ?? 2;
-  const system = buildReportSystemPrompt(resume, questionCount);
-  const user = buildReportUserPrompt(messages);
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    let raw: string;
-    try {
-      const userContent = attempt === 0 ? user : user + "\n\n上一次输出无法解析，请只输出纯 JSON。";
-      raw = await llm.complete([
-        { role: "system", content: system },
-        { role: "user", content: userContent },
-      ]);
-    } catch {
-      // 网络等异常：最后再抛给上层
-      if (attempt === maxAttempts - 1) throw new Error("report llm call failed");
-      continue;
-    }
-    const report = parseReport(raw);
-    if (report) return report;
-  }
-  return null;
 }

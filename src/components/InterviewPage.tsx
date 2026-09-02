@@ -1,171 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getSession, saveSession } from "@/lib/store";
-import {
-  appendMessage,
-  countAnswers,
-  createSession,
-  createStreamingAssistantPlaceholder,
-  finalizeAssistantMessage,
-  isAtQuestionLimit,
-} from "@/lib/session";
-import { streamChat } from "@/lib/chat-client";
-import type { ChatMessage, InterviewSession } from "@/lib/types";
-
-type Phase = "loading" | "ready" | "thinking";
+import { useRouter } from "next/navigation";
+import { MessageBubble } from "./MessageBubble";
+import { useInterviewChat } from "@/hooks/useInterviewChat";
 
 /**
- * 对话页 —— 面试主循环。
+ * 对话页 —— 纯 UI 编排。
+ * 面试状态机（加载/开场/提交/结束/流式）全部在 useInterviewChat hook。
  * 两种进入方式：
- * 1. ?id=<sessionId>：首页创建的正常面试会话（无历史则 AI 开场）
- * 2. ?resume=&seed=<问题>：报告页「重答这题」进入的临时练习会话
+ * 1. ?id=<sessionId>：正式面试会话
+ * 2. ?resume=&seed=<问题>：报告页「重答这题」临时会话
  */
 export function InterviewPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const sessionId = searchParams.get("id");
-  const resumeParam = searchParams.get("resume");
-  const seedParam = searchParams.get("seed");
-
-  const [session, setSession] = useState<InterviewSession | null>(null);
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [input, setInput] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  /** 向 AI 发送一轮：流式渲染 → 落库 → 恢复可输入 */
-  const askAI = useCallback(async (current: InterviewSession, userMessage: string) => {
-    setPhase("thinking");
-    setNotice(null);
-    const updated = userMessage.trim() ? appendMessage(current, "user", userMessage) : current;
-    // 先插入空占位 assistant 气泡用于流式渲染
-    const placeholder = createStreamingAssistantPlaceholder();
-    const withPlaceholder: InterviewSession = {
-      ...updated,
-      messages: [...updated.messages, placeholder],
-      updatedAt: Date.now(),
-    };
-    setSession(withPlaceholder);
-
-    let acc = "";
-    let finished = false;
-    const patchLast = (content: string) => {
-      setSession((prev) => {
-        if (!prev) return prev;
-        const msgs = prev.messages.map((m) => (m.id === placeholder.id ? { ...m, content } : m));
-        return { ...prev, messages: msgs, updatedAt: Date.now() };
-      });
-    };
-
-    await streamChat(
-      {
-        resume: updated.resume,
-        messages: current.messages,
-        questionCount: updated.questionCount,
-        userMessage,
-      },
-      {
-        onText: (delta) => {
-          acc += delta;
-          if (!finished) patchLast(acc);
-        },
-        onDone: () => {
-          finished = true;
-          const final = finalizeAssistantMessage(withPlaceholder, acc);
-          void saveSession(final).then(() => setSession(final));
-          setPhase("ready");
-        },
-        onError: (msg) => {
-          finished = true;
-          // 移除占位气泡，恢复可输入
-          setSession(updated);
-          setNotice(msg);
-          setPhase("ready");
-        },
-      }
-    );
-  }, []);
-
-  // 加载会话（?id=）或创建重答临时会话（?resume=&seed=）
-  const loadedRef = useRef(false);
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
-
-    if (sessionId) {
-      void getSession(sessionId).then((s) => {
-        if (!s) {
-          router.replace("/");
-          return;
-        }
-        setSession(s);
-        setPhase("ready");
-        const needsOpening = s.messages.length === 0;
-        const last = s.messages[s.messages.length - 1];
-        const interrupted = last && last.role === "assistant" && !last.content.trim();
-        if (needsOpening || interrupted) {
-          // 无历史开场；或上次中断在生成中重新请求
-          void askAI(s, "");
-        }
-      });
-    } else {
-      // 报告页「重答这题」入口：新建临时会话
-      const questionCount = 10;
-      // seed 问题注入 resume 前缀，让 AI 开场即针对性重问该题（复用现有 prompt 通道）
-      const effectiveResume = seedParam
-        ? `【本次重练目标问题】${seedParam}\n\n${resumeParam ?? ""}`
-        : (resumeParam ?? "");
-      const temp = createSession(effectiveResume, questionCount);
-      Promise.resolve().then(() => {
-        setSession(temp);
-        setPhase("ready");
-        void askAI(temp, "");
-      });
-    }
-  }, [sessionId, resumeParam, seedParam, router, askAI]);
-
-  // 自动滚动到底
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [session?.messages, phase]);
-
-  const handleSubmit = useCallback(() => {
-    if (!session || phase !== "ready" || !input.trim()) return;
-    const text = input.trim();
-    setInput("");
-    void askAI(session, text);
-  }, [session, phase, input, askAI]);
-
-  const handleEndInterview = useCallback(() => {
-    if (!session) return;
-    // 临时重练会话：结束即回首页，不生成报告
-    if (!sessionId) {
-      router.push("/");
-      return;
-    }
-    if (countAnswers(session) < 2) {
-      setNotice("对话还太短，至少回答 2 轮再结束才能生成有效报告");
-      setConfirmOpen(false);
-      return;
-    }
-    // 标记 completed 并跳报告页（report 由报告页生成）
-    const ended: InterviewSession = { ...session, status: "completed", updatedAt: Date.now() };
-    void saveSession(ended).then(() => router.push(`/report?id=${session.id}&generate=1`));
-  }, [session, sessionId, router]);
+  const {
+    session,
+    phase,
+    input,
+    setInput,
+    confirmOpen,
+    setConfirmOpen,
+    notice,
+    submit,
+    endInterview,
+    isTemporary,
+    answers,
+    atLimit,
+  } = useInterviewChat();
 
   if (!session || phase === "loading") {
     return <div className="p-8 text-center text-ink-secondary">加载中…</div>;
   }
 
-  const answers = countAnswers(session);
-  const atLimit = isAtQuestionLimit(session);
-  const isTemporary = !sessionId;
+  const thinking = phase === "thinking";
+  const streamingEmpty = session.messages.some((m) => m.role === "assistant" && m.content === "");
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -209,7 +78,7 @@ export function InterviewPage() {
       </header>
 
       {/* 消息区 */}
-      <div ref={scrollRef} className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6">
+      <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto mb-6 max-w-md rounded-xl bg-soft-blue p-3 text-center text-[13px] leading-5 text-ink-secondary">
           {isTemporary
             ? "🎯 这一轮只练报告里标记的那一题：AI 会重新抛出问题，你组织语言回答，答完可再练或完成。"
@@ -217,20 +86,19 @@ export function InterviewPage() {
         </div>
         <div className="space-y-5">
           {session.messages.map((m) => (
-            <MessageBubble key={m.id} message={m} streaming={phase === "thinking"} />
+            <MessageBubble key={m.id} message={m} streaming={thinking} />
           ))}
-          {phase === "thinking" &&
-            !session.messages.some((m) => m.role === "assistant" && m.content === "") && (
-              <div className="flex gap-1.5 pl-1">
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted"
-                    style={{ animationDelay: `${i * 0.15}s` }}
-                  />
-                ))}
-              </div>
-            )}
+          {thinking && !streamingEmpty && (
+            <div className="flex gap-1.5 pl-1">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {notice && (
@@ -244,24 +112,22 @@ export function InterviewPage() {
       <footer className="border-t border-border bg-background">
         <div className="mx-auto flex max-w-3xl items-end gap-2 px-4 py-3">
           <textarea
-            ref={inputRef}
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
+              // 输入框随内容自动增高（上限 160px）
               e.target.style.height = "auto";
               e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit();
+                submit();
               }
             }}
-            disabled={phase !== "ready"}
+            disabled={thinking}
             placeholder={
-              phase === "thinking"
-                ? "面试官正在思考…"
-                : "输入你的回答（Enter 提交，Shift+Enter 换行）"
+              thinking ? "面试官正在思考…" : "输入你的回答（Enter 提交，Shift+Enter 换行）"
             }
             rows={1}
             className="max-h-40 flex-1 resize-none rounded-xl border border-border px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none transition-colors placeholder:text-ink-muted focus:border-primary disabled:bg-soft-gray disabled:text-ink-muted"
@@ -269,8 +135,8 @@ export function InterviewPage() {
           />
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={phase !== "ready" || !input.trim()}
+            onClick={submit}
+            disabled={thinking || !input.trim()}
             className="rounded-xl bg-primary px-5 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-40"
             data-testid="send-button"
           >
@@ -305,7 +171,7 @@ export function InterviewPage() {
               </button>
               <button
                 type="button"
-                onClick={() => void handleEndInterview()}
+                onClick={() => void endInterview()}
                 className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-hover"
               >
                 结束并生成报告
@@ -314,26 +180,6 @@ export function InterviewPage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/** 单条消息气泡（Notion 风格：AI 白卡片，用户蓝填充） */
-function MessageBubble({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
-  const isAi = message.role === "assistant";
-  const isStreamingEmpty = streaming && isAi && message.content === "";
-  return (
-    <div className={`flex ${isAi ? "justify-start" : "justify-end"}`}>
-      <div
-        className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-6 ${
-          isAi ? "border border-border bg-white text-ink" : "bg-primary text-white"
-        }`}
-      >
-        {isStreamingEmpty ? <span className="text-ink-muted">正在思考…</span> : message.content}
-        {streaming && isAi && message.content && (
-          <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-primary align-middle" />
-        )}
-      </div>
     </div>
   );
 }
