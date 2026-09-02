@@ -28,7 +28,7 @@ npm run quality   # = lint + format:check + typecheck + vitest run
 - `format:check`：Prettier 统一格式
 - `typecheck`：`tsc --noEmit`，TS strict
 - `test`：Vitest。**LLM 相关测试必须 mock，不得在测试中发起真实网络请求**
-- 覆盖率门槛：`src/lib/**` + `src/components/**` 核心逻辑 ≥ 80%（见 vitest.config.ts）
+- 覆盖率门槛：`src/lib/**` 核心逻辑行/语句/函数 ≥ 80%（见 vitest.config.ts；组件要求关键交互有测试）
 - 修复格式用 `npm run format`（写文件），不要手动改格式
 
 ## 3. 架构与密钥红线（不可违反）

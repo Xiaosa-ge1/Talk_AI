@@ -7,6 +7,7 @@ import { getSession, saveSession } from "@/lib/store";
 import {
   appendMessage,
   countAnswers,
+  createSession,
   createStreamingAssistantPlaceholder,
   finalizeAssistantMessage,
   isAtQuestionLimit,
@@ -18,13 +19,16 @@ type Phase = "loading" | "ready" | "thinking";
 
 /**
  * 对话页 —— 面试主循环。
- * 状态机：ready(等作答) → thinking(AI 生成中禁输入) → ready
- * 会话从 IndexedDB 按 ?id= 加载；无历史则 AI 开场。
+ * 两种进入方式：
+ * 1. ?id=<sessionId>：首页创建的正常面试会话（无历史则 AI 开场）
+ * 2. ?resume=&seed=<问题>：报告页「重答这题」进入的临时练习会话
  */
 export function InterviewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("id");
+  const resumeParam = searchParams.get("resume");
+  const seedParam = searchParams.get("seed");
 
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -87,29 +91,43 @@ export function InterviewPage() {
     );
   }, []);
 
-  // 加载会话（sessionId 变化时），无历史则开场
-  const loadedRef = useRef<string | null>(null);
+  // 加载会话（?id=）或创建重答临时会话（?resume=&seed=）
+  const loadedRef = useRef(false);
   useEffect(() => {
-    if (!sessionId || loadedRef.current === sessionId) return;
-    loadedRef.current = sessionId;
-    void getSession(sessionId).then((s) => {
-      if (!s) {
-        router.replace("/");
-        return;
-      }
-      setSession(s);
-      setPhase("ready");
-      if (s.messages.length === 0) {
-        void askAI(s, "");
-      } else {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+
+    if (sessionId) {
+      void getSession(sessionId).then((s) => {
+        if (!s) {
+          router.replace("/");
+          return;
+        }
+        setSession(s);
+        setPhase("ready");
+        const needsOpening = s.messages.length === 0;
         const last = s.messages[s.messages.length - 1];
-        if (last.role === "assistant" && !last.content.trim()) {
-          // 上次中断在生成中：重新请求
+        const interrupted = last && last.role === "assistant" && !last.content.trim();
+        if (needsOpening || interrupted) {
+          // 无历史开场；或上次中断在生成中重新请求
           void askAI(s, "");
         }
-      }
-    });
-  }, [sessionId, router, askAI]);
+      });
+    } else {
+      // 报告页「重答这题」入口：新建临时会话
+      const questionCount = 10;
+      // seed 问题注入 resume 前缀，让 AI 开场即针对性重问该题（复用现有 prompt 通道）
+      const effectiveResume = seedParam
+        ? `【本次重练目标问题】${seedParam}\n\n${resumeParam ?? ""}`
+        : (resumeParam ?? "");
+      const temp = createSession(effectiveResume, questionCount);
+      Promise.resolve().then(() => {
+        setSession(temp);
+        setPhase("ready");
+        void askAI(temp, "");
+      });
+    }
+  }, [sessionId, resumeParam, seedParam, router, askAI]);
 
   // 自动滚动到底
   useEffect(() => {
@@ -126,6 +144,11 @@ export function InterviewPage() {
 
   const handleEndInterview = useCallback(() => {
     if (!session) return;
+    // 临时重练会话：结束即回首页，不生成报告
+    if (!sessionId) {
+      router.push("/");
+      return;
+    }
     if (countAnswers(session) < 2) {
       setNotice("对话还太短，至少回答 2 轮再结束才能生成有效报告");
       setConfirmOpen(false);
@@ -134,7 +157,7 @@ export function InterviewPage() {
     // 标记 completed 并跳报告页（report 由报告页生成）
     const ended: InterviewSession = { ...session, status: "completed", updatedAt: Date.now() };
     void saveSession(ended).then(() => router.push(`/report?id=${session.id}&generate=1`));
-  }, [session, router]);
+  }, [session, sessionId, router]);
 
   if (!session || phase === "loading") {
     return <div className="p-8 text-center text-ink-secondary">加载中…</div>;
@@ -142,6 +165,7 @@ export function InterviewPage() {
 
   const answers = countAnswers(session);
   const atLimit = isAtQuestionLimit(session);
+  const isTemporary = !sessionId;
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -152,27 +176,44 @@ export function InterviewPage() {
             <Link href="/" className="text-ink-muted hover:text-ink" aria-label="返回首页">
               ←
             </Link>
-            <span className="text-[14px] font-semibold text-ink">产品经理面试</span>
-            <span className="rounded-full bg-soft-gray px-2 py-0.5 text-[12px] text-ink-secondary">
-              {answers} / {session.questionCount} 题
+            <span className="text-[14px] font-semibold text-ink">
+              {isTemporary ? "重练这题" : "产品经理面试"}
             </span>
-            {atLimit && <span className="text-[12px] text-primary">已达目标题量，可以结束啦</span>}
+            {!isTemporary && (
+              <span className="rounded-full bg-soft-gray px-2 py-0.5 text-[12px] text-ink-secondary">
+                {answers} / {session.questionCount} 题
+              </span>
+            )}
+            {atLimit && !isTemporary && (
+              <span className="text-[12px] text-primary">已达目标题量，可以结束啦</span>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={() => setConfirmOpen(true)}
-            className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:border-primary/50 hover:text-primary"
-          >
-            结束面试
-          </button>
+          {isTemporary ? (
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:border-primary/50 hover:text-primary"
+            >
+              完成练习
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(true)}
+              className="rounded-lg border border-border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:border-primary/50 hover:text-primary"
+            >
+              结束面试
+            </button>
+          )}
         </div>
       </header>
 
       {/* 消息区 */}
       <div ref={scrollRef} className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto mb-6 max-w-md rounded-xl bg-soft-blue p-3 text-center text-[13px] leading-5 text-ink-secondary">
-          💡 像真实面试一样作答。AI
-          一次问一题，你答完提交，它会顺着你的经历追问。随时可点「结束面试」生成报告。
+          {isTemporary
+            ? "🎯 这一轮只练报告里标记的那一题：AI 会重新抛出问题，你组织语言回答，答完可再练或完成。"
+            : "💡 像真实面试一样作答。AI 一次问一题，你答完提交，它会顺着你的经历追问。随时可点「结束面试」生成报告。"}
         </div>
         <div className="space-y-5">
           {session.messages.map((m) => (
@@ -236,11 +277,13 @@ export function InterviewPage() {
             发送
           </button>
         </div>
-        <p className="pb-2 text-center text-[12px] text-ink-muted">对话数据仅保存在本浏览器</p>
+        <p className="pb-2 text-center text-[12px] text-ink-muted">
+          {isTemporary ? "临时练习，不保存历史" : "对话数据仅保存在本浏览器"}
+        </p>
       </footer>
 
-      {/* 结束确认弹窗 */}
-      {confirmOpen && (
+      {/* 结束确认弹窗（仅正式会话） */}
+      {confirmOpen && !isTemporary && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
           role="dialog"
