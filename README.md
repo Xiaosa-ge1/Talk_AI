@@ -29,14 +29,14 @@ npm run dev
 
 ## 常用命令
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | 本地开发 |
-| `npm run quality` | **质量门禁**：lint + format:check + typecheck + 全部测试（交付前必须全绿） |
-| `npm run test` | 跑测试 |
-| `npm run coverage` | 覆盖率报告（lib 核心逻辑 ≥80%） |
-| `npm run lint` / `npm run typecheck` | 单项检查 |
-| `npm run format` | 自动格式化 |
+| 命令                                 | 说明                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `npm run dev`                        | 本地开发                                                                   |
+| `npm run quality`                    | **质量门禁**：lint + format:check + typecheck + 全部测试（交付前必须全绿） |
+| `npm run test`                       | 跑测试                                                                     |
+| `npm run coverage`                   | 覆盖率报告（lib 核心逻辑 ≥80%）                                            |
+| `npm run lint` / `npm run typecheck` | 单项检查                                                                   |
+| `npm run format`                     | 自动格式化                                                                 |
 
 ## 架构
 
