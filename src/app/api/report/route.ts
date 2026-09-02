@@ -1,15 +1,16 @@
 import { NextRequest } from "next/server";
 import { createDefaultLlmClient } from "@/lib/deepseek";
-import { generateReport, type ReportLlm } from "@/lib/report";
-import type { ReportRequestBody } from "@/lib/types";
+import { buildReportSystemPrompt, buildReportUserPrompt, parseReport } from "@/lib/report";
+import type { ReportRequestBody, ReportStreamEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 /**
- * POST /api/report
- * 无状态：前端携带 resume + 完整问答历史，服务端生成结构化报告。
- * 报告 JSON 解析失败自动重试一次；LLM 异常返回 500（前端降级提示）。
+ * POST /api/report（SSE 流式）
+ * 无状态：前端携带 resume + 完整问答历史。
+ * 生成流程：LLM 流式输出 → 文本增量实时转发前端（供进度条估算）→
+ * 文本收完后服务端解析 JSON（失败自动重试一次）→ done 事件携带最终报告。
  */
 export async function POST(request: NextRequest) {
   let body: ReportRequestBody;
@@ -32,36 +33,68 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "服务端未配置 LLM 密钥" }, { status: 500 });
   }
 
-  // DeepSeekClient 只暴露 streamChat；报告用非流式一次取完
-  const llm: ReportLlm = {
-    complete: async (msgs) => {
-      let full = "";
-      await client.streamChat({
-        messages: msgs.map((m) => ({ role: m.role, content: m.content })),
-        onDelta: (delta) => {
-          full += delta;
-        },
-      });
-      return full;
-    },
-  };
+  const system = buildReportSystemPrompt(resume ?? "", questionCount ?? 10);
+  const user = buildReportUserPrompt(messages);
 
-  try {
-    const report = await generateReport({
-      resume: resume ?? "",
-      questionCount: questionCount ?? 10,
-      messages,
-      llm,
-    });
-    if (!report) {
-      return Response.json(
-        { error: "报告生成失败：AI 输出无法解析，请重试", code: "parse_failed" },
-        { status: 422 }
-      );
-    }
-    return Response.json({ report });
-  } catch (err) {
-    console.error("report generation error:", err);
-    return Response.json({ error: "报告生成失败，请稍后重试", code: "llm_error" }, { status: 500 });
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: ReportStreamEvent) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+
+      const llmMessages: Array<{ role: "system" | "user"; content: string }> = [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ];
+
+      // 最多尝试 2 次（JSON 解析失败时重试，重试提示只输出 JSON）
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let raw = "";
+        try {
+          const messagesForAttempt =
+            attempt === 0
+              ? llmMessages
+              : [
+                  { role: "system" as const, content: system },
+                  {
+                    role: "user" as const,
+                    content: user + "\n\n上一次输出无法解析，请只输出纯 JSON。",
+                  },
+                ];
+          await client.streamChat({
+            messages: messagesForAttempt,
+            onDelta: (delta) => {
+              raw += delta;
+              send({ type: "text", delta });
+            },
+          });
+        } catch (err) {
+          console.error("report stream error:", err);
+          if (attempt === 1) {
+            send({ type: "error", message: "报告生成失败：网络异常，请重试" });
+          }
+          continue;
+        }
+
+        const report = parseReport(raw);
+        if (report) {
+          send({ type: "done", report });
+          break;
+        }
+        if (attempt === 1) {
+          send({ type: "error", message: "报告生成失败：AI 输出无法解析，请重试" });
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }

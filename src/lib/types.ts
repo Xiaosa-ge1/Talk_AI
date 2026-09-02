@@ -102,6 +102,14 @@ export interface ReportRequestBody {
   questionCount: number;
 }
 
+/** /api/report 的流式事件类型（生成进度 + 最终报告） */
+export type ReportStreamEvent =
+  /** LLM 生成的原始文本增量（用于估算进度，不直接展示） */
+  | { type: "text"; delta: string }
+  /** 完成：携带最终结构化报告 */
+  | { type: "done"; report: InterviewReport }
+  | { type: "error"; message: string };
+
 /** 简历解析结果 */
 export interface ParseResumeResult {
   /** 提取出的纯文本（换行归一化） */

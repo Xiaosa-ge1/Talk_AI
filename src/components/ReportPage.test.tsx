@@ -79,22 +79,58 @@ describe("ReportPage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("无报告且 generate=1 时调用 /api/report 并保存", async () => {
+  it("无报告且 generate=1 时流式生成并保存", async () => {
     (getSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+    // mock SSE 响应：先推文本增量（驱动进度），再 done 携带报告
+    const report = makeReport();
+    const reportJson = JSON.stringify(report);
+    const events = [
+      `data: {"type":"text","delta":"${reportJson.slice(0, 30)}"}\n\n`,
+      `data: {"type":"text","delta":"${reportJson.slice(30)}"}\n\n`,
+      `data: ${JSON.stringify({ type: "done", report })}\n\n`,
+    ].join("");
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ report: makeReport() }),
-      })
+      vi.fn().mockResolvedValue(
+        new Response(events, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      )
     );
     render(<ReportPage />);
 
+    // 完成后展示报告
     expect(await screen.findByText("表现良好")).toBeInTheDocument();
     // 报告已保存（completed 会话 + report）
     expect(saveSession).toHaveBeenCalledTimes(1);
     const saved = (saveSession as ReturnType<typeof vi.fn>).mock.calls[0][0] as InterviewSession;
     expect(saved.report?.summary).toBe("表现良好");
+  });
+
+  it("生成中展示进度信号（文本流未结束时显示进度条与阶段文案）", async () => {
+    (getSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+    // mock 只推 text 事件（不触发 done）→ 页面停留在 generating
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            `data: ${JSON.stringify({ type: "text", delta: "这段文字用于驱动进度" })}\n\n`,
+            { status: 200, headers: { "Content-Type": "text/event-stream" } }
+          )
+        )
+    );
+    render(<ReportPage />);
+
+    // 进度条与生成中文案出现
+    expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByText(/AI 正在撰写你的面试报告/)).toBeInTheDocument();
+    // 阶段文案随进度切换（初始阶段：通读对话）
+    expect(screen.getByText(/正在通读你的面试对话/)).toBeInTheDocument();
+    // 已生成字数提示
+    expect(screen.getByText(/已生成/)).toBeInTheDocument();
   });
 
   it("无报告且无 generate 参数时提示未生成", async () => {

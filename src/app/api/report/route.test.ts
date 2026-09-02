@@ -45,6 +45,15 @@ function validReportJson(): string {
   });
 }
 
+/** 让 mock 的 streamChat 按块推送文本并结束 */
+function mockStreaming(chunks: string[], { error }: { error?: boolean } = {}) {
+  __mockStreamChat.mockImplementation(async (params: { onDelta: (d: string) => void }) => {
+    if (error) throw new Error("network down");
+    for (const c of chunks) params.onDelta(c);
+    return chunks.join("");
+  });
+}
+
 beforeEach(() => {
   vi.stubEnv("DEEPSEEK_API_KEY", "test-key");
 });
@@ -54,7 +63,7 @@ afterEach(() => {
   __mockStreamChat.mockReset();
 });
 
-describe("POST /api/report", () => {
+describe("POST /api/report (SSE)", () => {
   it("参数不完整返回 400", async () => {
     const res = await POST(fakeRequest({}));
     expect(res.status).toBe(400);
@@ -65,16 +74,21 @@ describe("POST /api/report", () => {
     expect(res.status).toBe(400);
   });
 
-  it("成功生成并返回报告", async () => {
-    __mockStreamChat.mockImplementation(async (params: { onDelta: (d: string) => void }) => {
-      params.onDelta(validReportJson());
-      return validReportJson();
-    });
+  it("流式转发 text 事件并在 done 携带报告", async () => {
+    const json = validReportJson();
+    // 分两段推文本，模拟流式
+    mockStreaming([json.slice(0, 40), json.slice(40)]);
     const res = await POST(fakeRequest({ resume: "张三简历", messages, questionCount: 8 }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { report?: { summary?: string } };
-    expect(body.report?.summary).toContain("整体表现不错");
-    // 校验传给 LLM 的消息含简历与实录
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+    const sse = await res.text();
+    // 应有 text 事件（含部分 JSON）
+    expect(sse).toContain('"type":"text"');
+    // 最终 done 事件带 report
+    expect(sse).toContain('"type":"done"');
+    expect(sse).toContain('"summary":"整体表现不错');
+    // 校验传给 LLM 的 system prompt 含简历
     const callArgs = __mockStreamChat.mock.calls[0][0] as {
       messages: Array<{ role: string; content: string }>;
     };
@@ -83,20 +97,35 @@ describe("POST /api/report", () => {
     expect(joined).toContain("我是张三");
   });
 
-  it("AI 输出无法解析 → 重试后仍失败返回 422", async () => {
-    __mockStreamChat.mockImplementation(async (params: { onDelta: (d: string) => void }) => {
-      params.onDelta("抱歉我不会生成 JSON");
-      return "抱歉我不会生成 JSON";
-    });
+  it("AI 输出无法解析 → 自动重试（第二次调用带重试提示）", async () => {
+    // 第一次输出杂音，第二次输出合法 JSON
+    __mockStreamChat
+      .mockImplementationOnce(async (params: { onDelta: (d: string) => void }) => {
+        params.onDelta("抱歉我不会 JSON");
+        return "抱歉我不会 JSON";
+      })
+      .mockImplementationOnce(async (params: { onDelta: (d: string) => void }) => {
+        params.onDelta(validReportJson());
+        return validReportJson();
+      });
+
     const res = await POST(fakeRequest({ resume: "", messages, questionCount: 8 }));
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("parse_failed");
+    expect(res.status).toBe(200);
+    const sse = await res.text();
+    expect(sse).toContain('"type":"done"');
+    expect(__mockStreamChat).toHaveBeenCalledTimes(2);
+    // 第二次调用的 user 消息应包含重试提示
+    const secondCall = __mockStreamChat.mock.calls[1][0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(secondCall.messages[1].content).toContain("只输出纯 JSON");
   });
 
-  it("LLM 抛错返回 500", async () => {
-    __mockStreamChat.mockRejectedValue(new Error("network down"));
+  it("LLM 抛错时输出 error 事件", async () => {
+    mockStreaming([], { error: true });
     const res = await POST(fakeRequest({ resume: "", messages, questionCount: 8 }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const sse = await res.text();
+    expect(sse).toContain('"type":"error"');
   });
 });
