@@ -1,0 +1,43 @@
+{
+  "name": "interview-coach",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "quality": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.1",
+    "mammoth": "^1.12.2",
+    "pdfjs-dist": "^6.3.289",
+    "prettier": "^3.9.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  }
+}
