@@ -2,25 +2,46 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: rgba(0, 0, 0, 0.95);
 }
 
+/* Notion 风格设计系统（参考 notion.com 实测色板） */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* Notion 主蓝 #0075DE */
+  --color-primary: #0075de;
+  --color-primary-hover: #0062ba;
+  --color-primary-soft: #f2f9ff;
+
+  /* 辅助色块（浅色点缀卡片/标签） */
+  --color-soft-gray: #f6f5f4;
+  --color-soft-blue: #f2f9ff;
+  --color-soft-orange: #fef3f1;
+  --color-soft-amber: #fff5e0;
+
+  /* 文字层级（Notion 风格近黑主文字 + 次级灰） */
+  --color-ink: rgba(0, 0, 0, 0.95);
+  --color-ink-secondary: rgba(0, 0, 0, 0.55);
+  --color-ink-muted: rgba(0, 0, 0, 0.4);
+  --color-border: rgba(0, 0, 0, 0.12);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    var(--font-geist-sans),
+    -apple-system,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Noto Sans SC",
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
