@@ -33,10 +33,13 @@ function normalize(text: string): string {
 }
 
 async function parsePdf(data: Uint8Array): Promise<string> {
-  // pdfjs-dist v6 是纯 ESM 且需要 Node 端字体/路径配置，只能动态 import
+  // pdfjs-dist v6 是纯 ESM。next.config 的 serverExternalPackages 让它从
+  // node_modules 原生加载，pdfjs 内部按相对路径 import pdf.worker.mjs 才能成功。
+  // 不要手动设置 workerSrc/file:// —— 会被 Next.js 模块 loader 拦截改写。
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const { pathToFileURL } = await import("node:url");
   const { resolve } = await import("node:path");
+
   const standardFontDataUrl = pathToFileURL(
     resolve(process.cwd(), "node_modules/pdfjs-dist/standard_fonts/") + "/"
   ).href;
