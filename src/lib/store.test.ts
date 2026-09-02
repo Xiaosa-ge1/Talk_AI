@@ -68,9 +68,7 @@ describe("store", () => {
   it("更新同一会话会覆盖并刷新 updatedAt 顺序", async () => {
     await saveSession(makeSession({ id: "a", status: "completed", updatedAt: 100 }));
     await saveSession(makeSession({ id: "b", status: "completed", updatedAt: 200 }));
-    await saveSession(
-      makeSession({ id: "a", updatedAt: 999, status: "completed", report: null })
-    );
+    await saveSession(makeSession({ id: "a", updatedAt: 999, status: "completed", report: null }));
 
     const sessions = await listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["a", "b"]);
