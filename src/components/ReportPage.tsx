@@ -35,11 +35,14 @@ export function ReportPage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState<GenProgress>({ percent: 0, chars: 0 });
-  const generatedRef = useRef(false);
+  // 记录已处理过的 sessionId，防止 dev 模式 effect 双调用重复生成
+  const handledRef = useRef<string | null>(null);
 
   // 加载会话并按需生成报告
   useEffect(() => {
     if (!sessionId) return;
+    if (handledRef.current === sessionId) return;
+    handledRef.current = sessionId;
     void getSession(sessionId).then(async (s) => {
       if (!s) {
         router.replace("/");
@@ -50,13 +53,12 @@ export function ReportPage() {
         setPhase("ready");
         return;
       }
-      if (!generate || generatedRef.current) {
+      if (!generate) {
         setPhase("error");
         setErrorMsg("这份面试还没有生成报告。");
         return;
       }
       // 生成报告（流式，实时更新进度）
-      generatedRef.current = true;
       setPhase("generating");
       setProgress({ percent: 0, chars: 0 });
       try {
