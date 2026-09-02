@@ -111,7 +111,10 @@ export function UploadCard({ onParsed, onSkip }: UploadCardProps) {
         )}
         {status.kind === "parsing" && (
           <>
-            <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden />
+            <span
+              className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"
+              aria-hidden
+            />
             <p className="text-[15px] font-medium text-ink">正在解析 {status.fileName}…</p>
           </>
         )}

@@ -55,7 +55,10 @@ export function appendMessage(
 }
 
 /** 把最后一条 assistant 消息标记为完成（流式渲染结束时用），返回新副本 */
-export function finalizeAssistantMessage(session: InterviewSession, content: string): InterviewSession {
+export function finalizeAssistantMessage(
+  session: InterviewSession,
+  content: string
+): InterviewSession {
   const messages = [...session.messages];
   if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
     messages[messages.length - 1] = { ...messages[messages.length - 1], content };

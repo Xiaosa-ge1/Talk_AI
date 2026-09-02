@@ -98,7 +98,9 @@ export function HomePage() {
               type="button"
               onClick={() => setMode("upload")}
               className={`flex-1 rounded-lg px-4 py-2 font-medium transition-colors ${
-                mode === "upload" ? "bg-white text-ink shadow-sm" : "text-ink-secondary hover:text-ink"
+                mode === "upload"
+                  ? "bg-white text-ink shadow-sm"
+                  : "text-ink-secondary hover:text-ink"
               }`}
             >
               上传简历
@@ -107,7 +109,9 @@ export function HomePage() {
               type="button"
               onClick={() => setMode("paste")}
               className={`flex-1 rounded-lg px-4 py-2 font-medium transition-colors ${
-                mode === "paste" ? "bg-white text-ink shadow-sm" : "text-ink-secondary hover:text-ink"
+                mode === "paste"
+                  ? "bg-white text-ink shadow-sm"
+                  : "text-ink-secondary hover:text-ink"
               }`}
             >
               粘贴简历
@@ -169,9 +173,24 @@ export function HomePage() {
         {/* 三步特性（Notion 浅色块卡片） */}
         <section className="mx-auto mt-20 grid max-w-3xl gap-4 sm:grid-cols-3">
           {[
-            { bg: "bg-soft-blue", icon: "🎙️", title: "真实追问", desc: "像资深 PM 面试官，深挖你的项目、数据与决策。" },
-            { bg: "bg-soft-orange", icon: "📊", title: "专属报告", desc: "总评 + 维度分析 + 3 个最该改进的地方。" },
-            { bg: "bg-soft-amber", icon: "🔁", title: "重答这题", desc: "报告里每题可一键重练，练到会为止。" },
+            {
+              bg: "bg-soft-blue",
+              icon: "🎙️",
+              title: "真实追问",
+              desc: "像资深 PM 面试官，深挖你的项目、数据与决策。",
+            },
+            {
+              bg: "bg-soft-orange",
+              icon: "📊",
+              title: "专属报告",
+              desc: "总评 + 维度分析 + 3 个最该改进的地方。",
+            },
+            {
+              bg: "bg-soft-amber",
+              icon: "🔁",
+              title: "重答这题",
+              desc: "报告里每题可一键重练，练到会为止。",
+            },
           ].map((f) => (
             <div key={f.title} className={`${f.bg} rounded-xl p-5`}>
               <div className="text-[22px]">{f.icon}</div>
@@ -185,13 +204,19 @@ export function HomePage() {
         <section id="history" className="mx-auto mt-16 max-w-3xl pb-20">
           <h2 className="text-lg font-semibold text-ink">最近练习</h2>
           {history.length === 0 ? (
-            <p className="mt-3 text-[14px] text-ink-muted">还没有练习记录，完成第一次面试后这里会展示报告。</p>
+            <p className="mt-3 text-[14px] text-ink-muted">
+              还没有练习记录，完成第一次面试后这里会展示报告。
+            </p>
           ) : (
             <ul className="mt-4 space-y-2">
               {history.slice(0, 8).map((s) => (
                 <li key={s.id}>
                   <Link
-                    href={s.status === "completed" && s.report ? `/report?id=${s.id}` : `/interview?id=${s.id}`}
+                    href={
+                      s.status === "completed" && s.report
+                        ? `/report?id=${s.id}`
+                        : `/interview?id=${s.id}`
+                    }
                     className="flex items-center justify-between rounded-xl border border-border px-4 py-3 transition-colors hover:border-primary/40 hover:bg-soft-gray"
                   >
                     <span className="text-[14px] text-ink">
