@@ -74,10 +74,15 @@ export interface StartInterviewInput {
   questionCount: number;
 }
 
-/** /api/chat 的请求体 */
+/** /api/chat 的请求体（无状态：会话历史由前端随请求携带） */
 export interface ChatRequestBody {
-  sessionId: string;
-  /** 用户本轮的回答文本（首轮可为空触发开场） */
+  /** 解析后的简历文本（无简历时为空字符串） */
+  resume: string;
+  /** 完整对话历史（含 AI 提问与用户作答，不含本轮 userMessage） */
+  messages: ChatMessage[];
+  /** 目标题量（用于开场与节奏提示） */
+  questionCount: number;
+  /** 用户本轮的回答文本 */
   userMessage: string;
 }
 
@@ -87,9 +92,14 @@ export type ChatStreamEvent =
   | { type: "done"; messageId: string }
   | { type: "error"; message: string };
 
-/** /api/report 的请求体 */
+/** /api/report 的请求体（无状态：由前端携带完整问答） */
 export interface ReportRequestBody {
-  sessionId: string;
+  /** 解析后的简历文本 */
+  resume: string;
+  /** 完整对话历史 */
+  messages: ChatMessage[];
+  /** 目标题量（展示用） */
+  questionCount: number;
 }
 
 /** 简历解析结果 */
