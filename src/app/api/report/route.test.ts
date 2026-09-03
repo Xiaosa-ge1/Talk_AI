@@ -128,4 +128,71 @@ describe("POST /api/report (SSE)", () => {
     const sse = await res.text();
     expect(sse).toContain('"type":"error"');
   });
+
+  it("scale=100 透传：越界分按 0-100 收敛，system prompt 用百分制", async () => {
+    const outOfRange = JSON.stringify({
+      summary: "百分制测试",
+      dimensions: [
+        { key: "logic", label: "表达逻辑", score: 150, comment: "爆表" },
+        { key: "depth", label: "专业深度", score: -10, comment: "负分" },
+        { key: "data", label: "数据思维", score: 72, comment: "合法值原样保留" },
+        { key: "agility", label: "应变能力", score: 85, comment: "合法值原样保留" },
+      ],
+      improvements: [],
+      highlight: { question: "q", quote: "原话", praise: "好" },
+    });
+    mockStreaming([outOfRange]);
+
+    const res = await POST(fakeRequest({ resume: "", messages, questionCount: 8, scale: 100 }));
+    expect(res.status).toBe(200);
+    const sse = await res.text();
+
+    // system prompt 收到百分制评分标准
+    const callArgs = __mockStreamChat.mock.calls[0][0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(callArgs.messages[0].content).toContain("100 分制");
+
+    // done 事件的分数按 0-100 收敛（若 scale 未透传，150 会被 5 分制收敛成 5）
+    const doneLine = sse
+      .split("\n")
+      .find((l) => l.startsWith("data:") && l.includes('"type":"done"'));
+    expect(doneLine).toBeDefined();
+    const event = JSON.parse(doneLine!.slice(5).trim()) as {
+      report: { dimensions: Array<{ key: string; score: number }> };
+    };
+    const scores = Object.fromEntries(event.report.dimensions.map((d) => [d.key, d.score]));
+    expect(scores.logic).toBe(100);
+    expect(scores.depth).toBe(0);
+    expect(scores.data).toBe(72);
+    expect(scores.agility).toBe(85);
+  });
+
+  it("不传 scale 默认 5 分制：越界分收敛到 1-5", async () => {
+    const outOfRange = JSON.stringify({
+      summary: "默认分制",
+      dimensions: [
+        { key: "logic", label: "表达逻辑", score: 9, comment: "爆表" },
+        { key: "depth", label: "专业深度", score: 0, comment: "触底" },
+        { key: "data", label: "数据思维", score: 3, comment: "合法值" },
+        { key: "agility", label: "应变能力", score: 4, comment: "合法值" },
+      ],
+      improvements: [],
+      highlight: { question: "q", quote: "原话", praise: "好" },
+    });
+    mockStreaming([outOfRange]);
+
+    const res = await POST(fakeRequest({ resume: "", messages, questionCount: 8 }));
+    expect(res.status).toBe(200);
+    const sse = await res.text();
+    const doneLine = sse
+      .split("\n")
+      .find((l) => l.startsWith("data:") && l.includes('"type":"done"'));
+    const event = JSON.parse(doneLine!.slice(5).trim()) as {
+      report: { dimensions: Array<{ key: string; score: number }> };
+    };
+    const scores = Object.fromEntries(event.report.dimensions.map((d) => [d.key, d.score]));
+    expect(scores.logic).toBe(5);
+    expect(scores.depth).toBe(1);
+  });
 });

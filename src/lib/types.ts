@@ -94,6 +94,9 @@ export type ChatStreamEvent =
   | { type: "done"; messageId: string }
   | { type: "error"; message: string };
 
+/** 评分分制：5 分制（产品默认）或百分制（分制对比实验用） */
+export type ScoreScale = 5 | 100;
+
 /** /api/report 的请求体（无状态：由前端携带完整问答） */
 export interface ReportRequestBody {
   /** 解析后的简历文本 */
@@ -102,6 +105,8 @@ export interface ReportRequestBody {
   messages: ChatMessage[];
   /** 目标题量（展示用） */
   questionCount: number;
+  /** 评分分制，缺省 5 分制。仅评测脚本做分制对比实验时使用 */
+  scale?: ScoreScale;
 }
 
 /** /api/report 的流式事件类型（生成进度 + 最终报告） */

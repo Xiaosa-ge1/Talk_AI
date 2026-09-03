@@ -57,6 +57,12 @@ export function ReportView({ report, onRetryQuestion }: ReportViewProps) {
                   />
                 </div>
                 {d.comment && <p className="mt-1 text-[12px] text-ink-muted">{d.comment}</p>}
+                {/* 评分依据：LLM 引用的对话原句，让分数可人工核验 */}
+                {d.evidence && (
+                  <p className="mt-1.5 border-l-2 border-border pl-2.5 text-[12px] leading-5 text-ink-muted">
+                    <span className="text-ink-secondary">评分依据：</span>“{d.evidence}”
+                  </p>
+                )}
               </li>
             ))}
           </ul>

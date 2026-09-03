@@ -5,3 +5,6 @@ build
 coverage
 package-lock.json
 next-env.d.ts
+# 独立 Node 诊断脚本与评测数据产物（同 eslint.globalIgnores）
+scripts/**
+evaluation/**

@@ -47,6 +47,29 @@ describe("ReportView", () => {
     expect(onRetry).toHaveBeenCalledWith("介绍一个你负责过的项目？");
   });
 
+  it("展示维度评分依据（evidence），让分数可人工核验", () => {
+    const withEvidence: InterviewReport = {
+      ...report,
+      dimensions: [
+        {
+          key: "data",
+          label: "数据思维",
+          score: 5,
+          comment: "指标意识强",
+          evidence: "日活从 10 万提升到 15 万",
+        },
+      ],
+    };
+    render(<ReportView report={withEvidence} onRetryQuestion={() => undefined} />);
+    expect(screen.getByText(/评分依据/)).toBeInTheDocument();
+    expect(screen.getByText(/日活从 10 万提升到 15 万/)).toBeInTheDocument();
+  });
+
+  it("evidence 缺失时不显示评分依据", () => {
+    render(<ReportView report={report} onRetryQuestion={() => undefined} />);
+    expect(screen.queryByText(/评分依据/)).toBeNull();
+  });
+
   it("空 improvements 时显示鼓励徽章", () => {
     const empty: InterviewReport = {
       ...report,

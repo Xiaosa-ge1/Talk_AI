@@ -97,6 +97,61 @@ describe("parseReport", () => {
   it("非法 JSON 返回 null", () => {
     expect(parseReport("not json")).toBeNull();
   });
+
+  it("schema 漂移：summary 写成 overall（实测形态）也能解析", () => {
+    const raw =
+      '{"report":{"overall":"总评不错","dimensions":[{"key":"logic","score":5,"comment":"清晰","evidence":"引用了原句"}],' +
+      '"improvements":[],"highlight":{"quote":"说得好的话","reason":"因为严谨"}}}';
+    const report = parseReport(raw);
+    expect(report?.summary).toBe("总评不错");
+    expect(report?.dimensions[0].score).toBe(5);
+    expect(report?.highlight.praise).toBe("因为严谨");
+  });
+
+  it("schema 漂移：dimensions 用对象按维度名（实测形态）保留真实分数而非默认 3 分", () => {
+    const raw =
+      '{"summary":"平铺对象形态","dimensions":{"logic":{"score":3,"evidence":"e1"},"depth":{"score":2,"evidence":"e2"},' +
+      '"data":{"score":4,"evidence":"e3"},"agility":{"score":3,"evidence":"e4"}}}';
+    const report = parseReport(raw);
+    expect(report?.dimensions.map((d) => `${d.key}:${d.score}`)).toEqual([
+      "logic:3",
+      "depth:2",
+      "data:4",
+      "agility:3",
+    ]);
+    expect(report?.dimensions[1].evidence).toBe("e2");
+  });
+
+  it("schema 漂移：highlight 写成复数数组（实测形态）取首项", () => {
+    const raw =
+      '{"report":{"overall":"s","highlights":[{"quote":"把留存提升到31%","comment":"有数字对比"}],' +
+      '"improvements":[],"dimensions":{"logic":{"score":2,"evidence":"e"}}}}';
+    const report = parseReport(raw);
+    expect(report?.highlight.quote).toBe("把留存提升到31%");
+    expect(report?.highlight.praise).toBe("有数字对比");
+    expect(report?.dimensions[0].score).toBe(2);
+  });
+
+  it("highlight 退化为纯字符串时兜底为 praise", () => {
+    const report = sanitizeReport({ summary: "s", highlight: "说得不错" });
+    expect(report?.highlight.praise).toBe("说得不错");
+  });
+
+  it("score 带单位/字符串也可解析", () => {
+    const report = sanitizeReport({
+      summary: "s",
+      dimensions: [{ key: "logic", score: "4分" }],
+    });
+    expect(report?.dimensions[0].score).toBe(4);
+  });
+
+  it("dimensions 对象只收合法维度键，多余键忽略", () => {
+    const report = sanitizeReport({
+      summary: "s",
+      dimensions: { logic: { score: 4 }, total_score: { score: 1 } },
+    });
+    expect(report?.dimensions.map((d) => d.key)).toEqual(["logic"]);
+  });
 });
 
 describe("prompt 组装", () => {
@@ -120,5 +175,48 @@ describe("prompt 组装", () => {
     const u = buildReportUserPrompt(sampleMessages);
     expect(u).toContain("面试官：请自我介绍");
     expect(u).toContain("候选人：我是张三，5 年产品经验");
+  });
+});
+
+describe("分制：5 分制 vs 百分制", () => {
+  // 注意：维度按 key 去重，测试里必须给不同 key，否则只保留第一份
+  const dim = (score: unknown, key: string) => ({ key, label: "x", score, comment: "c" });
+
+  it("5 分制（默认）把越界分收敛到 1-5", () => {
+    const r = sanitizeReport({ summary: "s", dimensions: [dim(9, "logic"), dim(0, "depth")] });
+    expect(r?.dimensions[0].score).toBe(5);
+    expect(r?.dimensions[1].score).toBe(1);
+  });
+
+  it("百分制把越界分收敛到 0-100", () => {
+    const r = sanitizeReport(
+      { summary: "s", dimensions: [dim(150, "logic"), dim(-10, "depth")] },
+      100
+    );
+    expect(r?.dimensions[0].score).toBe(100);
+    expect(r?.dimensions[1].score).toBe(0);
+  });
+
+  it("百分制合法区间内的分数原样保留", () => {
+    const r = sanitizeReport(
+      { summary: "s", dimensions: [dim(72, "logic"), dim(85.4, "depth")] },
+      100
+    );
+    expect(r?.dimensions[0].score).toBe(72);
+    expect(r?.dimensions[1].score).toBe(85);
+  });
+
+  it("维度缺失时兜底分随分制变化（3 / 60）", () => {
+    expect(sanitizeReport({ summary: "s" })?.dimensions[0].score).toBe(3);
+    expect(sanitizeReport({ summary: "s" }, 100)?.dimensions[0].score).toBe(60);
+  });
+
+  it("parseReport 按分制解析，字符串分数同样收敛", () => {
+    const raw = JSON.stringify({
+      summary: "总评",
+      dimensions: [{ key: "data", score: "120分", comment: "c", evidence: "转化率提升 30%" }],
+    });
+    expect(parseReport(raw, 100)?.dimensions[0].score).toBe(100);
+    expect(parseReport(raw)?.dimensions[0].score).toBe(5);
   });
 });

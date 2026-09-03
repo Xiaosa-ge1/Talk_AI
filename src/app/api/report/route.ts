@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createDefaultLlmClient } from "@/lib/deepseek";
 import { buildReportSystemPrompt, buildReportUserPrompt, parseReport } from "@/lib/report";
+import { normalizeScale } from "@/lib/rubric";
 import type { ReportRequestBody, ReportStreamEvent } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -20,10 +21,12 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "请求格式错误" }, { status: 400 });
   }
 
-  const { resume, messages, questionCount } = body;
+  const { resume, messages, questionCount, scale } = body;
   if (!Array.isArray(messages) || messages.length === 0) {
     return Response.json({ error: "对话内容为空，无法生成报告" }, { status: 400 });
   }
+  // 分制：仅评测脚本传 scale=100 做对比实验，产品默认 5 分制
+  const reportScale = normalizeScale(scale);
 
   let client;
   try {
@@ -33,7 +36,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "服务端未配置 LLM 密钥" }, { status: 500 });
   }
 
-  const system = buildReportSystemPrompt(resume ?? "", questionCount ?? 10);
+  const system = buildReportSystemPrompt(resume ?? "", questionCount ?? 10, reportScale);
   const user = buildReportUserPrompt(messages);
 
   const encoder = new TextEncoder();
@@ -79,7 +82,7 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const report = parseReport(raw);
+        const report = parseReport(raw, reportScale);
         if (report) {
           send({ type: "done", report });
           break;
