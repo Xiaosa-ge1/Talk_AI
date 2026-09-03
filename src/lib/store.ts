@@ -119,19 +119,3 @@ export async function listSessions(): Promise<InterviewSession[]> {
   const rank = (s: InterviewSession) => (s.status === "in_progress" ? 1 : 0);
   return all.sort((a, b) => rank(b) - rank(a) || b.updatedAt - a.updatedAt);
 }
-
-/** 删除单个会话 */
-export async function deleteSession(id: string): Promise<void> {
-  const database = await openDb();
-  const tx = database.transaction(STORE_NAME, "readwrite");
-  tx.objectStore(STORE_NAME).delete(id);
-  await transactionDone(tx);
-}
-
-/** 清空全部本地数据（设置页「清除数据」即注销） */
-export async function clearAllSessions(): Promise<void> {
-  const database = await openDb();
-  const tx = database.transaction(STORE_NAME, "readwrite");
-  tx.objectStore(STORE_NAME).clear();
-  await transactionDone(tx);
-}

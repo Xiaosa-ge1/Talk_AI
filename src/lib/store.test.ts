@@ -1,13 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { InterviewSession } from "./types";
-import {
-  __resetForTests,
-  clearAllSessions,
-  deleteSession,
-  getSession,
-  listSessions,
-  saveSession,
-} from "./store";
+import { __resetForTests, getSession, listSessions, saveSession } from "./store";
 
 function makeSession(overrides: Partial<InterviewSession> & { id: string }): InterviewSession {
   const now = Date.now();
@@ -72,18 +65,5 @@ describe("store", () => {
 
     const sessions = await listSessions();
     expect(sessions.map((s) => s.id)).toEqual(["a", "b"]);
-  });
-
-  it("deleteSession 删除后不可读", async () => {
-    await saveSession(makeSession({ id: "x" }));
-    await deleteSession("x");
-    expect(await getSession("x")).toBeNull();
-  });
-
-  it("clearAllSessions 清空所有会话", async () => {
-    await saveSession(makeSession({ id: "a" }));
-    await saveSession(makeSession({ id: "b" }));
-    await clearAllSessions();
-    expect(await listSessions()).toHaveLength(0);
   });
 });

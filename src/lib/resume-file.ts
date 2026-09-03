@@ -19,11 +19,13 @@ export class ResumeParseError extends Error {
   }
 }
 
-function isMeaningful(text: string): boolean {
+/** 提取到的文本是否是「空/无意义」——用于判定扫描版等异常（resume-parser 也复用） */
+export function isMeaningfulText(text: string): boolean {
   return text.replace(/\s/g, "").trim().length >= 10;
 }
 
-function normalize(text: string): string {
+/** 归一化换行：合并多余空行（PDF/DOCX 提取与粘贴文本共用） */
+export function normalizeText(text: string): string {
   return text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -66,7 +68,7 @@ async function parsePdf(data: Uint8Array): Promise<string> {
         .join(" ");
       pageTexts.push(line);
     }
-    return normalize(pageTexts.join("\n"));
+    return normalizeText(pageTexts.join("\n"));
   } finally {
     await loadingTask.destroy().catch(() => undefined);
   }
@@ -78,7 +80,7 @@ async function parseDocx(buffer: ArrayBuffer): Promise<string> {
   const require = createRequire(import.meta.url);
   const mammoth = require("mammoth");
   const result = await mammoth.extractRawText({ buffer });
-  return normalize(result.value);
+  return normalizeText(result.value);
 }
 
 function bytesToUint8(buffer: ArrayBuffer | Uint8Array): Uint8Array {
@@ -109,7 +111,7 @@ export async function parseResumeFile(
     throw new ResumeParseError("unsupported_type", "仅支持 PDF 或 Word 文件");
   }
 
-  if (!isMeaningful(text)) {
+  if (!isMeaningfulText(text)) {
     throw new ResumeParseError(
       "no_text",
       "未能从文件中提取到文本（可能是扫描版 PDF），请改用粘贴文本"

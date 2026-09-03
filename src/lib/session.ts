@@ -16,13 +16,9 @@ export function genId(): string {
   return `id_${Date.now()}_${idCounter}`;
 }
 
-export function now(): number {
-  return Date.now();
-}
-
 /** 创建新会话（首页「开始面试」时调用） */
 export function createSession(resume: string, questionCount: number): InterviewSession {
-  const t = now();
+  const t = Date.now();
   return {
     id: genId(),
     resume: resume.trim(),
@@ -45,12 +41,12 @@ export function appendMessage(
     id: genId(),
     role,
     content,
-    createdAt: now(),
+    createdAt: Date.now(),
   };
   return {
     ...session,
     messages: [...session.messages, message],
-    updatedAt: now(),
+    updatedAt: Date.now(),
   };
 }
 
@@ -63,9 +59,9 @@ export function finalizeAssistantMessage(
   if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
     messages[messages.length - 1] = { ...messages[messages.length - 1], content };
   } else {
-    messages.push({ id: genId(), role: "assistant", content, createdAt: now() });
+    messages.push({ id: genId(), role: "assistant", content, createdAt: Date.now() });
   }
-  return { ...session, messages, updatedAt: now() };
+  return { ...session, messages, updatedAt: Date.now() };
 }
 
 /** 已完成的问答轮数 = user 消息数 */
@@ -87,11 +83,11 @@ export function completeSession(
     ...session,
     status: "completed",
     report,
-    updatedAt: now(),
+    updatedAt: Date.now(),
   };
 }
 
 /** 生成一条占位 assistant 消息用于流式渲染（id 供前端引用） */
 export function createStreamingAssistantPlaceholder(): ChatMessage {
-  return { id: genId(), role: "assistant", content: "", createdAt: now() };
+  return { id: genId(), role: "assistant", content: "", createdAt: Date.now() };
 }
