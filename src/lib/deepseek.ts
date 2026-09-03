@@ -15,6 +15,8 @@ export interface StreamChatParams {
   /** 每个文本增量的回调 */
   onDelta: (delta: string) => void;
   signal?: AbortSignal;
+  /** 采样温度（0-1，越低越稳定；报告生成应使用低温度） */
+  temperature?: number;
 }
 
 export interface LlmClient {
@@ -73,10 +75,16 @@ export class DeepSeekClient implements LlmClient {
   constructor(
     private readonly apiKey: string,
     private readonly model = process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
-    private readonly endpoint = DEEPSEEK_ENDPOINT
+    private readonly endpoint = DEEPSEEK_ENDPOINT,
+    private readonly temperature = 0.8
   ) {}
 
-  async streamChat({ messages, onDelta, signal }: StreamChatParams): Promise<string> {
+  async streamChat({
+    messages,
+    onDelta,
+    signal,
+    temperature,
+  }: StreamChatParams & { temperature?: number }): Promise<string> {
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -87,7 +95,7 @@ export class DeepSeekClient implements LlmClient {
         model: this.model,
         messages,
         stream: true,
-        temperature: 0.8,
+        temperature: temperature ?? this.temperature,
       }),
       signal,
     });

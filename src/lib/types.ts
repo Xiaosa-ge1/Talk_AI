@@ -26,6 +26,8 @@ export interface DimensionScore {
   score: number;
   /** 一句话点评 */
   comment: string;
+  /** 评分依据：从对话引用的证据原句（让分数可人工核验） */
+  evidence?: string;
 }
 
 /** 重点改进项（原题 → 你的回答 → 问题 → 建议） */

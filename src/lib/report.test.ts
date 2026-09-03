@@ -89,6 +89,11 @@ describe("parseReport", () => {
     expect(parseReport(raw)?.summary).toBe("不错");
   });
 
+  it("容忍外层 report 包裹结构", () => {
+    const raw = '{"report":{"summary":"包了一层","dimensions":[]}}';
+    expect(parseReport(raw)?.summary).toBe("包了一层");
+  });
+
   it("非法 JSON 返回 null", () => {
     expect(parseReport("not json")).toBeNull();
   });

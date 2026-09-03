@@ -19,6 +19,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "coverage/**",
+    // 独立 Node 诊断脚本（不经构建，console 输出是正常行为）
+    "scripts/**",
+    "evaluation/**",
   ]),
 ]);
 

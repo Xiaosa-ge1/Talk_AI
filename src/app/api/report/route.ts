@@ -68,6 +68,8 @@ export async function POST(request: NextRequest) {
               raw += delta;
               send({ type: "text", delta });
             },
+            // 报告是结构化输出，低温提升稳定与解析成功率
+            temperature: 0.2,
           });
         } catch (err) {
           console.error("report stream error:", err);
