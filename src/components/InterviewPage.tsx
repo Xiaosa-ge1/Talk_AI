@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageBubble } from "./MessageBubble";
 import { useInterviewChat } from "@/hooks/useInterviewChat";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useAssistantSpeech } from "@/hooks/useAssistantSpeech";
+import { isVoiceInputSupported } from "@/lib/recorder";
 
 /**
  * 对话页 —— 纯 UI 编排。
@@ -22,19 +25,30 @@ export function InterviewPage() {
     confirmOpen,
     setConfirmOpen,
     notice,
+    setNotice,
     submit,
     endInterview,
     isTemporary,
     answers,
     atLimit,
   } = useInterviewChat();
-
+  const voiceSupported = isVoiceInputSupported();
+  const voice = useVoiceInput({
+    onTranscribed: (text) => setInput(text),
+    onError: (message) => setNotice(message),
+  });
+  const speech = useAssistantSpeech({
+    messages: session?.messages ?? [],
+    streaming: phase === "thinking",
+  });
   if (!session || phase === "loading") {
     return <div className="p-8 text-center text-ink-secondary">加载中…</div>;
   }
 
   const thinking = phase === "thinking";
   const streamingEmpty = session.messages.some((m) => m.role === "assistant" && m.content === "");
+  const voiceBusy = voice.phase !== "idle";
+  const sendDisabled = thinking || voiceBusy || !input.trim();
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -57,6 +71,22 @@ export function InterviewPage() {
               <span className="text-[12px] text-primary">已达目标题量，可以结束啦</span>
             )}
           </div>
+          {speech.supported && (
+            <button
+              type="button"
+              onClick={() => speech.setAutoSpeak(!speech.autoSpeak)}
+              title={speech.autoSpeak ? "关闭自动朗读" : "开启自动朗读"}
+              aria-label="自动朗读开关"
+              className={`mr-1 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                speech.autoSpeak
+                  ? "border-primary/40 text-primary"
+                  : "border-border text-ink-muted hover:text-ink"
+              }`}
+              data-testid="auto-speak-toggle"
+            >
+              {speech.autoSpeak ? "🔊 自动朗读" : "🔇 已静音"}
+            </button>
+          )}
           {isTemporary ? (
             <button
               type="button"
@@ -86,7 +116,23 @@ export function InterviewPage() {
         </div>
         <div className="space-y-5">
           {session.messages.map((m) => (
-            <MessageBubble key={m.id} message={m} streaming={thinking} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              streaming={thinking}
+              onSpeak={
+                m.role === "assistant" && speech.supported
+                  ? () => {
+                      if (speech.speakingId === m.id) {
+                        speech.stop();
+                      } else {
+                        speech.speak(m.content, m.id);
+                      }
+                    }
+                  : undefined
+              }
+              isSpeaking={speech.speakingId === m.id}
+            />
           ))}
           {thinking && !streamingEmpty && (
             <div className="flex gap-1.5 pl-1">
@@ -122,21 +168,55 @@ export function InterviewPage() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                if (!sendDisabled) submit();
               }
             }}
-            disabled={thinking}
+            disabled={thinking || voiceBusy}
             placeholder={
-              thinking ? "面试官正在思考…" : "输入你的回答（Enter 提交，Shift+Enter 换行）"
+              thinking
+                ? "面试官正在思考…"
+                : voice.phase === "transcribing"
+                  ? "正在识别你的语音…"
+                  : voice.phase === "recording"
+                    ? "正在录音，说完点右侧停止"
+                    : "输入或语音作答（可修改后发送）"
             }
             rows={1}
             className="max-h-40 flex-1 resize-none rounded-xl border border-border px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none transition-colors placeholder:text-ink-muted focus:border-primary disabled:bg-soft-gray disabled:text-ink-muted"
             data-testid="answer-input"
           />
+          {voiceSupported && voice.phase === "recording" && (
+            <button
+              type="button"
+              onClick={() => void voice.stop()}
+              className="rounded-xl bg-red-500 px-4 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-red-600"
+              data-testid="mic-stop-button"
+            >
+              ⏹ {voice.seconds}s
+            </button>
+          )}
+          {voiceSupported && voice.phase === "transcribing" && (
+            <span className="whitespace-nowrap rounded-xl bg-soft-gray px-4 py-2.5 text-[13px] text-ink-secondary">
+              识别中…
+            </span>
+          )}
+          {voiceSupported && voice.phase === "idle" && (
+            <button
+              type="button"
+              onClick={() => void voice.start()}
+              disabled={thinking}
+              title="语音作答：录音识别后填入输入框，可修改再发送"
+              aria-label="语音作答"
+              className="rounded-xl border border-border px-3.5 py-2.5 text-[16px] leading-none transition-colors hover:border-primary/50 disabled:opacity-40"
+              data-testid="mic-button"
+            >
+              🎤
+            </button>
+          )}
           <button
             type="button"
             onClick={submit}
-            disabled={thinking || !input.trim()}
+            disabled={sendDisabled}
             className="rounded-xl bg-primary px-5 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-40"
             data-testid="send-button"
           >

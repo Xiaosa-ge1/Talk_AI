@@ -22,6 +22,8 @@ export interface InterviewChatState {
   confirmOpen: boolean;
   setConfirmOpen: (open: boolean) => void;
   notice: string | null;
+  /** 设置顶部提示（供语音等扩展功能复用同一提示通道） */
+  setNotice: (message: string | null) => void;
   /** 用户提交本轮回答 */
   submit: () => void;
   /** 结束面试（正式会话 → 生成报告；临时会话 → 回首页） */
@@ -106,10 +108,13 @@ export function useInterviewChat(): InterviewChatState {
   }, []);
 
   // 加载会话（?id=）或创建重答临时会话（?resume=&seed=）
-  const loadedRef = useRef(false);
+  // 记录已处理过的入口标识而非 boolean：dev 模式 effect 双调用只处理一次，
+  // 且切换入口（不同 sessionId / 不同 seed 的重练）会正确重新处理
+  const handledKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
+    const key = sessionId ? `session:${sessionId}` : `temp:${seedParam ?? ""}`;
+    if (handledKeyRef.current === key) return;
+    handledKeyRef.current = key;
 
     if (sessionId) {
       void getSession(sessionId).then((s) => {
@@ -176,6 +181,7 @@ export function useInterviewChat(): InterviewChatState {
     confirmOpen,
     setConfirmOpen,
     notice,
+    setNotice,
     submit,
     endInterview,
     isTemporary,

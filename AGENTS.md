@@ -14,7 +14,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## 1. 产品是什么
 
-上传真实简历（PDF/Word）→ AI 扮演产品经理岗面试官进行多轮文字追问 → 结束后生成面试报告（总评 + 维度评估 + 重点改进 3 处 + 重答这题）。纯文字、无语音。MVP 面向单人本地使用。
+上传真实简历（PDF/Word）→ AI 扮演产品经理岗面试官进行多轮追问 → 结束后生成面试报告（总评 + 维度评估 + 重点改进 3 处 + 重答这题）。文字为主，支持**语音作答**（录音 → 讯飞识别 → 填入输入框可改后发送）与 **AI 提问朗读**（浏览器 SpeechSynthesis，优先中文神经音色）。MVP 面向单人本地使用（Windows/Edge 效果最佳）。
 
 ## 2. 质量门禁（最重要——任何阶段交付前必须全绿）
 
@@ -29,6 +29,7 @@ npm run quality   # = lint + format:check + typecheck + vitest run
 - `typecheck`：`tsc --noEmit`，TS strict
 - `test`：Vitest。**LLM 相关测试必须 mock，不得在测试中发起真实网络请求**
 - 覆盖率门槛：`src/lib/**` 核心逻辑行/语句/函数 ≥ 80%（见 vitest.config.ts；组件要求关键交互有测试）
+- 测试哲学（tdd）：测试验证**公开接口行为**、写在**预先约定的 seam**，不测实现细节；禁止为凑覆盖率写水平切片测试或同义反复断言
 - 修复格式用 `npm run format`（写文件），不要手动改格式
 
 ## 3. 模块 / 依赖 / 生命周期约束（交付前逐条自查，不满足不算完成）
@@ -55,17 +56,18 @@ npm run quality   # = lint + format:check + typecheck + vitest run
 
 ## 4. 架构与密钥红线（不可违反）
 
-- **API 密钥只在服务端**：`DEEPSEEK_API_KEY` 放在 `.env.local`（已被 .gitignore 忽略），只由 API route（服务端）读取。**任何情况下不得把 key 传给前端组件/浏览器，不得用 `NEXT_PUBLIC_*` 前缀暴露**
-- 前端只通过 `fetch("/api/*")` 调用后端；所有 DeepSeek 调用必须经由 `src/lib/deepseek.ts` 的可注入接口（便于测试 mock）
+- **API 密钥只在服务端**：`DEEPSEEK_API_KEY`、`XFYUN_APP_ID` / `XFYUN_API_KEY` / `XFYUN_API_SECRET`（讯飞语音听写，控制台应用添加「语音听写（流式版）」服务后查看，APISecret 取控制台显示原值）都放在 `.env.local`（已被 .gitignore 忽略），只由 API route（服务端）读取。**任何情况下不得把 key 传给前端组件/浏览器，不得用 `NEXT_PUBLIC_*` 前缀暴露**
+- 前端只通过 `fetch("/api/*")` 调用后端；外部服务调用（DeepSeek 走 `src/lib/deepseek.ts`，讯飞语音听写走 `src/lib/asr-client.ts` 的 iat v2 WebSocket 客户端）都必须经由可注入接口（便于测试 mock）
 - 无数据库、无账号：用户数据（面试会话、报告）只存浏览器 IndexedDB（`src/lib/store.ts`）
 - 报告保留最近 50 条自动清理（store 内实现）
 
 ## 5. 对话状态机（对话页核心，防并发错乱）
 
+实际实现为三相（见 `src/hooks/useInterviewChat.ts` 的 `InterviewPhase`）：
+
 ```
-idle → interviewing（AI 流式提问渲染中）→ answered（用户作答等待提交）
-     → thinking（AI 生成中，输入禁用）
-     ↳ 任意状态可点「结束」→ 确认弹窗 → 调用 /api/report 生成报告
+loading（加载会话/建临时会话）→ ready（等用户作答，AI 生成中不可提交）
+     → thinking（AI 流式生成中，输入禁用）→ ready
 ```
 
 - AI 生成中用户**不可提交**新作答（防乱序）
@@ -79,29 +81,38 @@ idle → interviewing（AI 流式提问渲染中）→ answered（用户作答�
 - 角色是「产品经理岗面试官」，语气专业但不居高临下
 - 首题必须问候开场（确认收到简历/或说明无简历），不直接甩题
 
+## 6.5 报告评测规范（src/lib/rubric.ts + report.ts）
+
+- `rubric.ts` 是评分标准的唯一来源：维度固定 4 个 key（logic/depth/data/agility）+ 中文标签；每维有 1/3/5 分行为锚点，相邻档可取 2/4
+- 每维必须给 `evidence`（引用对话原句作为打分依据，入库截断 200 字）；无证据支撑的分数视为不合格
+- 温度分层：报告生成 temperature=0.2（稳定输出 JSON），对话保持 0.8；改动须同时改 `deepseek.ts` 与调用处
+- LLM 输出 schema 不可信：`parseReport` 必须容错（剥 markdown 围栏、截取 JSON、容忍 `summary/overall` 别名、dimensions 数组或对象两种形态、highlight 归一化）；route 解析失败自动重试一次
+- prompt 必须含显式 JSON 结构示例并声明「字段名一个都不能改」，防止 schema 漂移
+
 ## 7. 异常兜底（用户体验底线）
 
-| 场景                                | 处理                                                 |
-| ----------------------------------- | ---------------------------------------------------- |
-| 简历解析失败（扫描版 PDF/损坏文件） | 返回友好错误提示，前端引导「转粘贴文本」继续，不白屏 |
-| LLM 超时                            | 自动重试一次，仍失败给「网络开小差，请重试」提示     |
-| /api/report 返回非 JSON             | 解析失败自动重试一次，仍失败降级为纯文本展示         |
-| 面试中途退出                        | 确认弹窗；确认后若问答 < 2 轮则不生成报告            |
+| 场景                                | 处理                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| 简历解析失败（扫描版 PDF/损坏文件） | 返回友好错误提示，前端引导「转粘贴文本」继续，不白屏                            |
+| LLM 超时                            | 自动重试一次，仍失败给「网络开小差，请重试」提示                                |
+| /api/report 返回非 JSON             | 解析失败自动重试一次（重试提示只输出纯 JSON），仍失败给「无法解析，请重试」提示 |
+| 语音识别失败/无麦克风权限           | 提示后回退纯文字输入，主链路不受影响（麦克风按钮仅在支持时显示）                |
+| 面试中途退出                        | 确认弹窗；确认后若问答 < 2 轮则不生成报告                                       |
 
 ## 8. 不做的事（P0 范围外，不要顺手实现）
 
-- ❌ 语音/录音（纯文字产品）
+- ❌ 实时/流式语音转写（边说边转）、录音存档与回放、服务端 TTS（朗读目前用浏览器 SpeechSynthesis）
 - ❌ 账号系统、数据库、服务端存储用户内容
 - ❌ 向量数据库 / RAG（P2 才考虑）
-- ❌ 部署、备案、移动端适配
+- ❌ 部署、备案、移动端适配（语音依赖桌面 Chrome/Edge）
 - ❌ 简历文件本地留存：解析完只保留提取的文本用于会话，文件本身不入库
 - ❌ 一次问多题、自动续答、AI 主动收尾
 
 ## 9. 页面与路由约定
 
 - `/` 首页：上传简历 + 题量选择 + 跳过出口
-- `/interview` 对话页（可带 `?resume=` 简历文本 / `?count=` 题量）
-- `/report?id=<会话ID>` 报告页（从 IndexedDB 读取）
+- `/interview` 对话页：`?id=<会话ID>` 正式会话；`?resume=<简历文本>&seed=<问题>` 报告页「重答这题」的临时会话（题量固定 10，不保存历史、不生成报告）
+- `/report?id=<会话ID>` 报告页（从 IndexedDB 读取；`&generate=1` 触发生成）
 - `src/lib/types.ts` 是所有共享类型的唯一来源
 
 ## 10. 完成一份工作的检查清单

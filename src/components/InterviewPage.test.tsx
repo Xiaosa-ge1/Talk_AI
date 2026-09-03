@@ -23,6 +23,20 @@ vi.mock("@/lib/chat-client", () => ({
   streamChat: (...args: unknown[]) => streamChatMock(...args),
 }));
 
+// mock 录音模块：语音可用性可切换，录音器行为可控
+const voice = vi.hoisted(() => ({
+  isSupported: vi.fn(() => true),
+  recorder: {
+    start: vi.fn(async () => undefined),
+    stop: vi.fn(async () => new Blob(["audio"], { type: "audio/mp4" })),
+    cancel: vi.fn(),
+  },
+}));
+vi.mock("@/lib/recorder", () => ({
+  isVoiceInputSupported: () => voice.isSupported(),
+  createAudioRecorder: () => voice.recorder,
+}));
+
 import { getSession, saveSession } from "@/lib/store";
 import { InterviewPage } from "./InterviewPage";
 
@@ -53,9 +67,19 @@ beforeEach(() => {
   mockRouterPush.mockReset();
   (getSession as ReturnType<typeof vi.fn>).mockReset();
   (saveSession as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(undefined);
+  voice.isSupported.mockReturnValue(true);
+  voice.recorder.start.mockReset().mockResolvedValue(undefined);
+  voice.recorder.stop.mockReset().mockResolvedValue(new Blob(["audio"], { type: "audio/mp4" }));
+  voice.recorder.cancel.mockReset();
+  // 默认 /api/asr 识别成功
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => ({ text: "语音转写的回答" }) }) as Response)
+  );
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -162,5 +186,69 @@ describe("InterviewPage", () => {
     expect(saveSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: "session-1", status: "completed" })
     );
+  });
+
+  it("语音不可用时（浏览器不支持）不渲染麦克风按钮", async () => {
+    voice.isSupported.mockReturnValue(false);
+    (getSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+    streamChatMock.mockImplementation(async (_body: unknown, h: Handlers) => {
+      h.onText("你好");
+      h.onDone?.();
+    });
+    render(<InterviewPage />);
+    await screen.findByText("你好");
+    expect(screen.queryByTestId("mic-button")).not.toBeInTheDocument();
+  });
+
+  it("语音作答：录音 → 停止 → 转写填入输入框 → 可修改后发送", async () => {
+    (getSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+    streamChatMock.mockImplementation(async (_body: unknown, h: Handlers) => {
+      h.onText("请自我介绍");
+      h.onDone?.();
+    });
+    const user = userEvent.setup();
+    render(<InterviewPage />);
+    await screen.findByText("请自我介绍");
+
+    // 开始录音
+    await user.click(screen.getByTestId("mic-button"));
+    expect(voice.recorder.start).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("mic-stop-button")).toBeInTheDocument();
+    // 录音中不能发送
+    expect(screen.getByTestId("send-button")).toBeDisabled();
+
+    // 停止 → 调 /api/asr → 文本填入输入框（用户确认前未发送）
+    await user.click(screen.getByTestId("mic-stop-button"));
+    await waitFor(() => expect(screen.getByTestId("answer-input")).toHaveValue("语音转写的回答"));
+    expect(streamChatMock).toHaveBeenCalledTimes(1); // 仍只有开场那一次，未发送语音文本
+
+    // 用户修改后点发送
+    await user.clear(screen.getByTestId("answer-input"));
+    await user.type(screen.getByTestId("answer-input"), "我叫张三，做过推荐系统");
+    await user.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(streamChatMock).toHaveBeenCalledTimes(2));
+    const body = streamChatMock.mock.calls[1][0] as { userMessage: string };
+    expect(body.userMessage).toBe("我叫张三，做过推荐系统");
+  });
+
+  it("语音识别失败（接口错误）→ notice 提示且不填入文本", async () => {
+    (getSession as ReturnType<typeof vi.fn>).mockResolvedValue(makeSession());
+    streamChatMock.mockImplementation(async (_body: unknown, h: Handlers) => {
+      h.onText("你好");
+      h.onDone?.();
+    });
+    const fetchMock = vi.fn(
+      async () => ({ ok: false, json: async () => ({ error: "额度不足" }) }) as Response
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<InterviewPage />);
+    await screen.findByText("你好");
+
+    await user.click(screen.getByTestId("mic-button"));
+    await user.click(screen.getByTestId("mic-stop-button"));
+    // notice 显示服务端真实错误（而非固定文案）
+    await waitFor(() => expect(screen.getByText(/额度不足/)).toBeInTheDocument());
+    expect(screen.getByTestId("answer-input")).toHaveValue("");
   });
 });
