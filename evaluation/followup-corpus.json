@@ -1,0 +1,62 @@
+[
+  {
+    "id": "good-01",
+    "quality": "good",
+    "resume": "3 年产品经理，负责电商推荐系统，主导召回策略重构，DAU 提升 30%。",
+    "history": [
+      { "role": "assistant", "content": "你在电商推荐系统里主要负责什么？" },
+      { "role": "user", "content": "我主导了召回策略的重构，把双塔模型从老用户扩展到全量，DAU 提升了 30%，留存也同步上涨了 5 个百分点。" }
+    ],
+    "keywords": ["召回", "双塔", "DAU", "30", "留存"]
+  },
+  {
+    "id": "good-02",
+    "quality": "good",
+    "resume": "4 年产品经理，做过社区产品和 B 端 SaaS，擅长数据驱动增长。",
+    "history": [
+      { "role": "assistant", "content": "能讲讲你最有成就感的一个项目吗？" },
+      { "role": "user", "content": "社区项目里，我用魔法数字分析定位到关键行为，把新用户 7 日留存从 20% 提到 35%，并且做了完整的 AB 测试验证归因。" }
+    ],
+    "keywords": ["魔法数字", "留存", "AB", "归因", "35"]
+  },
+  {
+    "id": "vague-01",
+    "quality": "vague",
+    "resume": "2 年产品经理，负责过资讯 App 的信息流。",
+    "history": [
+      { "role": "assistant", "content": "你在信息流优化里具体做了什么？" },
+      { "role": "user", "content": "主要就是做了些优化，让用户更喜欢看了。" }
+    ],
+    "keywords": ["优化"]
+  },
+  {
+    "id": "vague-02",
+    "quality": "vague",
+    "resume": "3 年产品经理，做过支付和会员产品。",
+    "history": [
+      { "role": "assistant", "content": "支付转化率你们是怎么提升的？" },
+      { "role": "user", "content": "我们做了很多，最后确实提升了一些。" }
+    ],
+    "keywords": ["提升", "转化率"]
+  },
+  {
+    "id": "good-03",
+    "quality": "good",
+    "resume": "5 年产品经理，带过 6 人团队，负责过跨境电商供应链产品。",
+    "history": [
+      { "role": "assistant", "content": "供应链产品里最难的决策是什么？" },
+      { "role": "user", "content": "最难的取舍是库存周转和履约时效的平衡，我最终选了前置仓模式，把平均履约时效从 72 小时压到 24 小时，虽然库存成本上升了 15%，但复购率提升了 12 个点。" }
+    ],
+    "keywords": ["前置仓", "履约", "库存", "复购", "24"]
+  },
+  {
+    "id": "vague-03",
+    "quality": "vague",
+    "resume": "1 年产品助理，参与过小程序商城。",
+    "history": [
+      { "role": "assistant", "content": "你在小程序商城里负责哪块？" },
+      { "role": "user", "content": "就帮帮忙，做点需求文档什么的。" }
+    ],
+    "keywords": ["需求文档"]
+  }
+]
