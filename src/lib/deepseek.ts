@@ -10,6 +10,13 @@ export interface LlmMessage {
   content: string;
 }
 
+/** DeepSeek 流式最后一条 chunk 携带的 token 用量 */
+export interface LlmUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface StreamChatParams {
   messages: LlmMessage[];
   /** 每个文本增量的回调 */
@@ -17,6 +24,8 @@ export interface StreamChatParams {
   signal?: AbortSignal;
   /** 采样温度（0-1，越低越稳定；报告生成应使用低温度） */
   temperature?: number;
+  /** 可选：流结束时回调用量（供成本统计；不传则忽略） */
+  onUsage?: (usage: LlmUsage) => void;
 }
 
 export interface LlmClient {
@@ -40,6 +49,32 @@ export function parseSseLine(line: string): string | null {
     };
     const content = json.choices?.[0]?.delta?.content;
     return typeof content === "string" ? content : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 从 OpenAI 兼容 SSE 的一行中解析 usage（token 用量）。
+ * 流式最后一条 chunk 形如 `data: {"usage":{"prompt_tokens":N,"completion_tokens":N,"total_tokens":N}}`。
+ * @returns 解析出的用量；该行无 usage 时返回 null
+ */
+export function parseSseUsage(line: string): LlmUsage | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const payload = trimmed.slice(5).trim();
+  if (payload === "[DONE]") return null;
+  try {
+    const json = JSON.parse(payload) as {
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+    const u = json.usage;
+    if (!u || typeof u.total_tokens !== "number") return null;
+    return {
+      promptTokens: typeof u.prompt_tokens === "number" ? u.prompt_tokens : 0,
+      completionTokens: typeof u.completion_tokens === "number" ? u.completion_tokens : 0,
+      totalTokens: u.total_tokens,
+    };
   } catch {
     return null;
   }
@@ -84,7 +119,8 @@ export class DeepSeekClient implements LlmClient {
     onDelta,
     signal,
     temperature,
-  }: StreamChatParams & { temperature?: number }): Promise<string> {
+    onUsage,
+  }: StreamChatParams): Promise<string> {
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -111,6 +147,10 @@ export class DeepSeekClient implements LlmClient {
       if (delta) {
         full += delta;
         onDelta(delta);
+      }
+      if (onUsage) {
+        const usage = parseSseUsage(line);
+        if (usage) onUsage(usage);
       }
     });
     return full;

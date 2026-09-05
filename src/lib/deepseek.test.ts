@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumeSseStream, parseSseLine } from "./deepseek";
+import { consumeSseStream, parseSseLine, parseSseUsage } from "./deepseek";
 
 describe("parseSseLine", () => {
   it("解析文本增量", () => {
@@ -23,6 +23,31 @@ describe("parseSseLine", () => {
 
   it("非法 JSON 返回 null（容错，不抛错）", () => {
     expect(parseSseLine("data: not-json")).toBeNull();
+  });
+});
+
+describe("parseSseUsage", () => {
+  it("解析流式最后一条 chunk 的 usage", () => {
+    const line =
+      'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":80,"total_tokens":200}}';
+    expect(parseSseUsage(line)).toEqual({
+      promptTokens: 120,
+      completionTokens: 80,
+      totalTokens: 200,
+    });
+  });
+
+  it("无 usage 字段返回 null", () => {
+    expect(parseSseUsage('data: {"choices":[{"delta":{"content":"x"}}]}')).toBeNull();
+  });
+
+  it("[DONE] 与非 data 行返回 null", () => {
+    expect(parseSseUsage("data: [DONE]")).toBeNull();
+    expect(parseSseUsage(": keep-alive")).toBeNull();
+  });
+
+  it("非法 JSON 返回 null（容错）", () => {
+    expect(parseSseUsage("data: not-json")).toBeNull();
   });
 });
 

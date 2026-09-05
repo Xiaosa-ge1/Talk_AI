@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# evaluation outputs (评测产物不入库，样本 golden-set-v2.json 保留)
+/evaluation/results/
+
 # next.js
 /.next/
 /out/

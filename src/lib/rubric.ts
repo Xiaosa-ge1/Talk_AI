@@ -91,11 +91,11 @@ const RUBRICS: DimensionRubric[] = [
   {
     key: "agility",
     label: DIMENSION_LABELS.agility,
-    focus: "面对追问/复盘时的应变：能否承认不足并给出可执行的改进",
+    focus: "面对面试官追问时的临场应变：能否接住追问、不卡壳、不回避，并把话题往深处推进",
     anchors: [
-      { desc: "被追问就卡壳或答非所问；复盘说不出教训或只会归咎外部" },
-      { desc: "能应对部分追问，复盘有教训但较笼统" },
-      { desc: "被追问能接住并深化；复盘具体、归因内部、改进可执行" },
+      { desc: "被追问就卡壳、答非所问，或回避问题、顾左右而言他" },
+      { desc: "能接住部分追问，但回答浮于表面，未就追问往深处推进" },
+      { desc: "被追问能正面接住并主动深化，把问题引向更本质的层面" },
     ],
   },
 ];
@@ -116,7 +116,8 @@ export function buildRubricPromptText(scale: ScoreScale = DEFAULT_SCORE_SCALE): 
         `维度「${r.label}」(key=${r.key})：考察${r.focus}\n` +
         r.anchors.map((a, i) => `  ${[low, mid, high][i]} 分：${a.desc}`).join("\n") +
         `\n  打分规则：先判断回答最接近哪一档的描述（${low}/${mid}/${high}），${adjacent}。必须给出 evidence，从面试实录中引用候选人的原话片段作为打分依据；找不到证据支撑的分数是不允许的。`
-    ).join("\n")
+    ).join("\n") +
+    `\n【反趋中 - 必须遵守】不同候选人的表现是有高下之分的，四维分数不应趋同。请对照各维锚点，明确区分强弱：回答真正达到高/低档描述的，就果断给 ${high} 或 ${low}，不要因为犹豫而默认塞进 ${mid}。宁可给错极端分，也不要四维都打同一个中间分。`
   );
 }
 
