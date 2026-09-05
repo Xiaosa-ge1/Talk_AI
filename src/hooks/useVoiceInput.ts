@@ -4,6 +4,9 @@ import { createAudioRecorder, type AudioRecorder } from "@/lib/recorder";
 /**
  * 语音作答状态机：录音 → 上传转写 → 回调文本（由页面填入输入框供用户确认编辑）。
  *
+ * 对话感模式（silenceAutoStop）：录音中检测到连续静音 1.5 秒，自动停止并转写，
+ * 让"说完自动结束"无需手动点停止。自动发送由调用方决定（拿到 onTranscribed 文本后）。
+ *
  * seam：浏览器能力（MediaRecorder/getUserMedia）与 /api/asr 调用均可注入，
  * 测试用 fake recorder / fake transcribe，不碰真实浏览器与网络。
  */
@@ -15,12 +18,16 @@ export interface UseVoiceInputOptions {
   onTranscribed: (text: string) => void;
   /** 错误（无麦克风/识别失败/超时等），显示在 notice */
   onError: (message: string) => void;
-  /** 注入 seam（默认创建真实录音器） */
-  createRecorder?: () => AudioRecorder;
+  /** 注入 seam（默认创建真实录音器；接收静音自动停止配置，供对话感模式） */
+  createRecorder?: (opts?: { silenceTimeoutMs?: number; onSilence?: () => void }) => AudioRecorder;
   /** 注入 seam（默认调 /api/asr） */
   transcribe?: (audio: Blob) => Promise<string>;
   /** 单段录音上限（秒），到点自动停止并转写 */
   maxSeconds?: number;
+  /** 对话感模式：静音自动停止（默认关闭） */
+  silenceAutoStop?: boolean;
+  /** 静音判定阈值（秒，默认 1.5） */
+  silenceSeconds?: number;
 }
 
 export interface UseVoiceInputState {
@@ -52,14 +59,21 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputState
   const recorderRef = useRef<AudioRecorder | null>(null);
 
   const maxSeconds = options.maxSeconds ?? 60;
+  const silenceSeconds = options.silenceSeconds ?? 1.5;
   const transcribe = useCallback(
     (audio: Blob) => (options.transcribe ?? defaultTranscribe)(audio),
     [options.transcribe]
   );
 
+  // phase 的 ref 镜像：供 onSilence / 计时器等异步回调读取最新值，避免闭包捕获旧 state
+  const phaseRef = useRef<VoicePhase>("idle");
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
   async function stopRecording(): Promise<void> {
     const recorder = recorderRef.current;
-    if (!recorder || phase !== "recording") return;
+    if (!recorder || phaseRef.current !== "recording") return;
     setPhase("transcribing");
     setSeconds(0);
     let blob: Blob;
@@ -115,7 +129,15 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputState
       if (phase !== "idle") return;
       let recorder: AudioRecorder;
       try {
-        recorder = options.createRecorder ? options.createRecorder() : createAudioRecorder();
+        const silence = options.silenceAutoStop
+          ? {
+              silenceTimeoutMs: Math.round(silenceSeconds * 1000),
+              onSilence: () => void stopRecording(),
+            }
+          : {};
+        recorder = options.createRecorder
+          ? options.createRecorder(silence)
+          : createAudioRecorder(silence);
         await recorder.start();
       } catch (err) {
         onError(err instanceof Error ? err.message : "无法开始录音（请检查麦克风权限）");

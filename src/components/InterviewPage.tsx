@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageBubble } from "./MessageBubble";
@@ -33,9 +34,19 @@ export function InterviewPage() {
     atLimit,
   } = useInterviewChat();
   const voiceSupported = isVoiceInputSupported();
+  // 对话感模式：录音静音自动结束，转写后自动发送（无需手动确认）
+  const [dialogueMode, setDialogueMode] = useState(false);
   const voice = useVoiceInput({
-    onTranscribed: (text) => setInput(text),
+    onTranscribed: (text) => {
+      if (dialogueMode) {
+        // 对话感模式：自动发送
+        submit(text);
+      } else {
+        setInput(text);
+      }
+    },
     onError: (message) => setNotice(message),
+    silenceAutoStop: dialogueMode,
   });
   const speech = useAssistantSpeech({
     messages: session?.messages ?? [],
@@ -85,6 +96,22 @@ export function InterviewPage() {
               data-testid="auto-speak-toggle"
             >
               {speech.autoSpeak ? "🔊 自动朗读" : "🔇 已静音"}
+            </button>
+          )}
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={() => setDialogueMode(!dialogueMode)}
+              title={dialogueMode ? "关闭对话感模式" : "开启对话感模式：说完自动发送，无需确认"}
+              aria-label="对话感模式开关"
+              className={`mr-1 rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                dialogueMode
+                  ? "border-primary/40 text-primary"
+                  : "border-border text-ink-muted hover:text-ink"
+              }`}
+              data-testid="dialogue-mode-toggle"
+            >
+              {dialogueMode ? "🎙️ 对话感" : "🎙️ 确认模式"}
             </button>
           )}
           {isTemporary ? (
@@ -215,7 +242,7 @@ export function InterviewPage() {
           )}
           <button
             type="button"
-            onClick={submit}
+            onClick={() => submit()}
             disabled={sendDisabled}
             className="rounded-xl bg-primary px-5 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-40"
             data-testid="send-button"

@@ -184,4 +184,65 @@ describe("useVoiceInput", () => {
     expect(onError).toHaveBeenCalled();
     expect(result.current.phase).toBe("idle");
   });
+
+  it("对话感模式：静音自动停止并转写（onSilence 触发自动 stop）", async () => {
+    // 捕获 createRecorder 收到的静音配置，模拟录音器内部静音检测触发 onSilence
+    let capturedSilence: { silenceTimeoutMs?: number; onSilence?: () => void } | undefined;
+    const recorder = fakeRecorder();
+    const transcribe = vi.fn(async () => "自动识别的内容");
+    const onTranscribed = vi.fn();
+    const { result } = renderHook(() =>
+      useVoiceInput({
+        onTranscribed,
+        onError: vi.fn(),
+        createRecorder: (opts) => {
+          capturedSilence = opts;
+          return recorder;
+        },
+        transcribe,
+        silenceAutoStop: true,
+        silenceSeconds: 1.5,
+      })
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.phase).toBe("recording");
+    // 静音配置正确传入（1.5 秒 = 1500ms），且带了 onSilence 回调
+    expect(capturedSilence?.silenceTimeoutMs).toBe(1500);
+    expect(capturedSilence?.onSilence).toBeTypeOf("function");
+
+    // 模拟录音器检测到静音，触发 onSilence → 自动 stop + 转写
+    await act(async () => {
+      capturedSilence?.onSilence?.();
+      await Promise.resolve();
+    });
+    expect(recorder.stopMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onTranscribed).toHaveBeenCalledWith("自动识别的内容");
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("非对话感模式：不传静音配置", async () => {
+    let capturedSilence: { silenceTimeoutMs?: number } | undefined;
+    const recorder = fakeRecorder();
+    const { result } = renderHook(() =>
+      useVoiceInput({
+        onTranscribed: vi.fn(),
+        onError: vi.fn(),
+        createRecorder: (opts) => {
+          capturedSilence = opts;
+          return recorder;
+        },
+        transcribe: vi.fn(async () => ""),
+      })
+    );
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(capturedSilence?.silenceTimeoutMs).toBeUndefined();
+  });
 });

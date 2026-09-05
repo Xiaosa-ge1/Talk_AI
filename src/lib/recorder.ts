@@ -14,6 +14,64 @@ export interface AudioRecorder {
   cancel(): void;
 }
 
+/** 录音配置（对话感模式的静音检测参数） */
+export interface RecorderOptions {
+  /** 连续静音多少毫秒判定"说完了"（默认 1500ms）；不传则不启用自动结束 */
+  silenceTimeoutMs?: number;
+  /** 判定为静音的音量阈值（RMS，0-1，默认 0.02） */
+  silenceThreshold?: number;
+  /** 静音判定回调：连续静音达到阈值时触发（供自动结束） */
+  onSilence?: () => void;
+}
+
+/** 计算一段采样块的 RMS 音量（均方根，0-1；纯函数，可单测） */
+export function computeRms(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sum += samples[i] * samples[i];
+  }
+  return Math.sqrt(sum / samples.length);
+}
+
+/** 静音检测器：累积连续静音时长，达到阈值触发 onSilence（纯逻辑，可单测） */
+export interface SilenceDetector {
+  /** 喂入一块采样，返回是否刚触发了静音结束 */
+  push(samples: Float32Array): boolean;
+  /** 重置静音累积（每次开口说话时清零） */
+  reset(): void;
+}
+
+export function createSilenceDetector(opts: {
+  sampleRate: number;
+  silenceTimeoutMs: number;
+  threshold?: number;
+  onSilence: () => void;
+}): SilenceDetector {
+  const threshold = opts.threshold ?? 0.02;
+  let silentSamples = 0;
+  const samplesPerTimeout = Math.floor((opts.silenceTimeoutMs / 1000) * opts.sampleRate);
+  return {
+    push(samples) {
+      const rms = computeRms(samples);
+      if (rms < threshold) {
+        silentSamples += samples.length;
+        if (silentSamples >= samplesPerTimeout) {
+          silentSamples = 0;
+          opts.onSilence();
+          return true;
+        }
+      } else {
+        silentSamples = 0;
+      }
+      return false;
+    },
+    reset() {
+      silentSamples = 0;
+    },
+  };
+}
+
 /** Float32 采样（-1..1）→ 16bit 小端 PCM 字节（纯函数，可单测） */
 export function floatSamplesToInt16Pcm(samples: Float32Array): ArrayBuffer {
   const out = new ArrayBuffer(samples.length * 2);
@@ -37,13 +95,14 @@ export function isVoiceInputSupported(): boolean {
 
 const SAMPLE_RATE = 16000;
 
-/** 创建真实录音器（浏览器端，产出 16k PCM） */
-export function createAudioRecorder(): AudioRecorder {
+/** 创建真实录音器（浏览器端，产出 16k PCM；可选静音自动结束） */
+export function createAudioRecorder(options: RecorderOptions = {}): AudioRecorder {
   let ctx: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let processor: ScriptProcessorNode | null = null;
   let stream: MediaStream | null = null;
   let chunks: ArrayBuffer[] = [];
+  let detector: SilenceDetector | null = null;
 
   return {
     async start() {
@@ -58,8 +117,19 @@ export function createAudioRecorder(): AudioRecorder {
       ctx = new AudioCtor({ sampleRate: SAMPLE_RATE });
       source = ctx.createMediaStreamSource(stream);
       processor = ctx.createScriptProcessor(4096, 1, 1);
+      // 静音检测：连续静音达到阈值触发 onSilence（对话感模式自动结束）
+      if (options.silenceTimeoutMs && options.onSilence) {
+        detector = createSilenceDetector({
+          sampleRate: SAMPLE_RATE,
+          silenceTimeoutMs: options.silenceTimeoutMs,
+          threshold: options.silenceThreshold,
+          onSilence: options.onSilence,
+        });
+      }
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
-        chunks.push(floatSamplesToInt16Pcm(e.inputBuffer.getChannelData(0)));
+        const samples = e.inputBuffer.getChannelData(0);
+        chunks.push(floatSamplesToInt16Pcm(samples));
+        detector?.push(samples);
       };
       source.connect(processor);
       processor.connect(ctx.destination); // 需要输出连接才会触发 onaudioprocess

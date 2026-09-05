@@ -24,8 +24,8 @@ export interface InterviewChatState {
   notice: string | null;
   /** 设置顶部提示（供语音等扩展功能复用同一提示通道） */
   setNotice: (message: string | null) => void;
-  /** 用户提交本轮回答 */
-  submit: () => void;
+  /** 用户提交本轮回答（可传入覆盖文本，供语音自动发送） */
+  submit: (overrideText?: string) => void;
   /** 结束面试（正式会话 → 生成报告；临时会话 → 回首页） */
   endInterview: () => void;
   /** 是否为「重答这题」临时会话（不保存历史、不生成报告） */
@@ -148,12 +148,16 @@ export function useInterviewChat(): InterviewChatState {
     }
   }, [sessionId, resumeParam, seedParam, router, askAI]);
 
-  const submit = useCallback(() => {
-    if (!session || phase !== "ready" || !input.trim()) return;
-    const text = input.trim();
-    setInput("");
-    void askAI(session, text);
-  }, [session, phase, input, askAI]);
+  const submit = useCallback(
+    (overrideText?: string) => {
+      if (!session || phase !== "ready") return;
+      const text = (overrideText ?? input).trim();
+      if (!text) return;
+      setInput("");
+      void askAI(session, text);
+    },
+    [session, phase, input, askAI]
+  );
 
   const endInterview = useCallback(() => {
     if (!session) return;
