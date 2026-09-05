@@ -22,6 +22,15 @@ export interface RecorderOptions {
   silenceThreshold?: number;
   /** 静音判定回调：连续静音达到阈值时触发（供自动结束） */
   onSilence?: () => void;
+  /** 语音激活：进入"监听"状态，检测到开口才正式录音（供对话感模式自动开始） */
+  speechActivation?: {
+    /** 判定"开口"的音量阈值（RMS，0-1，默认 0.05，略高于静音阈值防噪音误触发） */
+    threshold?: number;
+    /** 有声需持续多少毫秒才判定为真开口（默认 300ms，过滤咳嗽/杂音） */
+    minSpeechMs?: number;
+    /** 检测到开口的回调（供录音器从监听态切到录音态） */
+    onSpeechStart: () => void;
+  };
 }
 
 /** 计算一段采样块的 RMS 音量（均方根，0-1；纯函数，可单测） */
@@ -72,6 +81,47 @@ export function createSilenceDetector(opts: {
   };
 }
 
+/** 语音激活检测器：检测到持续有声达到阈值触发 onSpeechStart（纯逻辑，可单测） */
+export interface SpeechDetector {
+  /** 喂入一块采样，返回是否刚触发了"开口" */
+  push(samples: Float32Array): boolean;
+  /** 重置有声累积 */
+  reset(): void;
+}
+
+export function createSpeechDetector(opts: {
+  sampleRate: number;
+  minSpeechMs: number;
+  threshold?: number;
+  onSpeechStart: () => void;
+}): SpeechDetector {
+  const threshold = opts.threshold ?? 0.05;
+  let speechSamples = 0;
+  let fired = false;
+  const samplesPerMin = Math.floor((opts.minSpeechMs / 1000) * opts.sampleRate);
+  return {
+    push(samples) {
+      if (fired) return false;
+      const rms = computeRms(samples);
+      if (rms >= threshold) {
+        speechSamples += samples.length;
+        if (speechSamples >= samplesPerMin) {
+          fired = true;
+          opts.onSpeechStart();
+          return true;
+        }
+      } else {
+        speechSamples = 0;
+      }
+      return false;
+    },
+    reset() {
+      speechSamples = 0;
+      fired = false;
+    },
+  };
+}
+
 /** Float32 采样（-1..1）→ 16bit 小端 PCM 字节（纯函数，可单测） */
 export function floatSamplesToInt16Pcm(samples: Float32Array): ArrayBuffer {
   const out = new ArrayBuffer(samples.length * 2);
@@ -95,7 +145,7 @@ export function isVoiceInputSupported(): boolean {
 
 const SAMPLE_RATE = 16000;
 
-/** 创建真实录音器（浏览器端，产出 16k PCM；可选静音自动结束） */
+/** 创建真实录音器（浏览器端，产出 16k PCM；可选静音自动结束 / 语音激活自动开始） */
 export function createAudioRecorder(options: RecorderOptions = {}): AudioRecorder {
   let ctx: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
@@ -103,6 +153,9 @@ export function createAudioRecorder(options: RecorderOptions = {}): AudioRecorde
   let stream: MediaStream | null = null;
   let chunks: ArrayBuffer[] = [];
   let detector: SilenceDetector | null = null;
+  let speechDetector: SpeechDetector | null = null;
+  // 是否处于"监听中"（语音激活模式：麦克风已开但还没检测到开口，此时不记录）
+  let listening = false;
 
   return {
     async start() {
@@ -117,6 +170,7 @@ export function createAudioRecorder(options: RecorderOptions = {}): AudioRecorde
       ctx = new AudioCtor({ sampleRate: SAMPLE_RATE });
       source = ctx.createMediaStreamSource(stream);
       processor = ctx.createScriptProcessor(4096, 1, 1);
+
       // 静音检测：连续静音达到阈值触发 onSilence（对话感模式自动结束）
       if (options.silenceTimeoutMs && options.onSilence) {
         detector = createSilenceDetector({
@@ -126,8 +180,27 @@ export function createAudioRecorder(options: RecorderOptions = {}): AudioRecorde
           onSilence: options.onSilence,
         });
       }
+      // 语音激活：先监听，检测到开口才开始记录（对话感模式自动开始）
+      if (options.speechActivation) {
+        listening = true;
+        speechDetector = createSpeechDetector({
+          sampleRate: SAMPLE_RATE,
+          minSpeechMs: options.speechActivation.minSpeechMs ?? 300,
+          threshold: options.speechActivation.threshold,
+          onSpeechStart: () => {
+            listening = false;
+            options.speechActivation?.onSpeechStart();
+          },
+        });
+      }
+
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
         const samples = e.inputBuffer.getChannelData(0);
+        // 监听态：不记录，只做语音激活检测
+        if (listening) {
+          speechDetector?.push(samples);
+          return;
+        }
         chunks.push(floatSamplesToInt16Pcm(samples));
         detector?.push(samples);
       };

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { computeRms, createSilenceDetector, floatSamplesToInt16Pcm } from "./recorder";
+import {
+  computeRms,
+  createSilenceDetector,
+  createSpeechDetector,
+  floatSamplesToInt16Pcm,
+} from "./recorder";
 
 describe("floatSamplesToInt16Pcm", () => {
   it("把 Float32 采样转为 16bit 小端 PCM", () => {
@@ -71,5 +76,46 @@ describe("createSilenceDetector（静音检测）", () => {
     det.push(silent);
     det.push(silent);
     expect(onSilence).not.toHaveBeenCalled(); // reset 后重新累积，未到阈值
+  });
+});
+
+describe("createSpeechDetector（语音激活检测）", () => {
+  it("静音不触发开口", () => {
+    const onSpeechStart = vi.fn();
+    const det = createSpeechDetector({ sampleRate: 1000, minSpeechMs: 300, onSpeechStart });
+    const silent = new Float32Array(1000); // 全 0
+    expect(det.push(silent)).toBe(false);
+    expect(onSpeechStart).not.toHaveBeenCalled();
+  });
+
+  it("持续有声达到时长触发一次 onSpeechStart", () => {
+    const onSpeechStart = vi.fn();
+    // 采样率 1000，minSpeech 300ms = 300 采样；每块 100 采样，喂 3 块
+    const det = createSpeechDetector({ sampleRate: 1000, minSpeechMs: 300, onSpeechStart });
+    const loud = new Float32Array(100).fill(0.5);
+    expect(det.push(loud)).toBe(false); // 100 采样，未到 300
+    expect(det.push(loud)).toBe(false); // 200
+    expect(det.push(loud)).toBe(true); // 300 → 触发
+    expect(onSpeechStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("触发后不再重复触发（fired 锁）", () => {
+    const onSpeechStart = vi.fn();
+    const det = createSpeechDetector({ sampleRate: 1000, minSpeechMs: 300, onSpeechStart });
+    const loud = new Float32Array(100).fill(0.5);
+    det.push(loud);
+    det.push(loud);
+    det.push(loud);
+    det.push(loud); // 继续有声，不应再触发
+    expect(onSpeechStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("低于阈值的微弱声音不累积", () => {
+    const onSpeechStart = vi.fn();
+    // threshold 默认 0.05；0.03 低于阈值，不算开口
+    const det = createSpeechDetector({ sampleRate: 1000, minSpeechMs: 300, onSpeechStart });
+    const weak = new Float32Array(100).fill(0.03);
+    for (let i = 0; i < 5; i++) det.push(weak);
+    expect(onSpeechStart).not.toHaveBeenCalled();
   });
 });

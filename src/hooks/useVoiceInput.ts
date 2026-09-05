@@ -1,25 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createAudioRecorder, type AudioRecorder } from "@/lib/recorder";
+import { createAudioRecorder, type AudioRecorder, type RecorderOptions } from "@/lib/recorder";
 
 /**
  * 语音作答状态机：录音 → 上传转写 → 回调文本（由页面填入输入框供用户确认编辑）。
  *
- * 对话感模式（silenceAutoStop）：录音中检测到连续静音 1.5 秒，自动停止并转写，
- * 让"说完自动结束"无需手动点停止。自动发送由调用方决定（拿到 onTranscribed 文本后）。
+ * 对话感模式（silenceAutoStop）：录音中检测到连续静音 1.5 秒，自动停止并转写。
+ * 自动监听（autoListen）：start 后先进入"监听"态（不录音），检测到开口才正式录音，
+ * 让"面试官问完自动待命、你开口就录"无需手动点开始。
  *
  * seam：浏览器能力（MediaRecorder/getUserMedia）与 /api/asr 调用均可注入，
  * 测试用 fake recorder / fake transcribe，不碰真实浏览器与网络。
  */
 
-export type VoicePhase = "idle" | "recording" | "transcribing";
+export type VoicePhase = "idle" | "listening" | "recording" | "transcribing";
 
 export interface UseVoiceInputOptions {
   /** 转写成功：把文本交给调用方（填入输入框，供用户修改后发送） */
   onTranscribed: (text: string) => void;
   /** 错误（无麦克风/识别失败/超时等），显示在 notice */
   onError: (message: string) => void;
-  /** 注入 seam（默认创建真实录音器；接收静音自动停止配置，供对话感模式） */
-  createRecorder?: (opts?: { silenceTimeoutMs?: number; onSilence?: () => void }) => AudioRecorder;
+  /** 注入 seam（默认创建真实录音器；接收静音/语音激活配置） */
+  createRecorder?: (opts?: RecorderOptions) => AudioRecorder;
   /** 注入 seam（默认调 /api/asr） */
   transcribe?: (audio: Blob) => Promise<string>;
   /** 单段录音上限（秒），到点自动停止并转写 */
@@ -28,6 +29,8 @@ export interface UseVoiceInputOptions {
   silenceAutoStop?: boolean;
   /** 静音判定阈值（秒，默认 1.5） */
   silenceSeconds?: number;
+  /** 自动监听：start 后先监听，检测到开口才录音（默认关闭） */
+  autoListen?: boolean;
 }
 
 export interface UseVoiceInputState {
@@ -126,25 +129,35 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputState
     phase,
     seconds,
     async start() {
-      if (phase !== "idle") return;
+      if (phaseRef.current !== "idle") return;
       let recorder: AudioRecorder;
       try {
-        const silence = options.silenceAutoStop
-          ? {
-              silenceTimeoutMs: Math.round(silenceSeconds * 1000),
-              onSilence: () => void stopRecording(),
-            }
-          : {};
+        const opts: RecorderOptions = {};
+        if (options.silenceAutoStop) {
+          opts.silenceTimeoutMs = Math.round(silenceSeconds * 1000);
+          opts.onSilence = () => void stopRecording();
+        }
+        if (options.autoListen) {
+          opts.speechActivation = {
+            onSpeechStart: () => {
+              setPhase("recording");
+              setSeconds(0);
+            },
+          };
+        }
         recorder = options.createRecorder
-          ? options.createRecorder(silence)
-          : createAudioRecorder(silence);
+          ? options.createRecorder(opts)
+          : createAudioRecorder(opts);
+        // 先存 ref，再 start：确保 start 过程中（getUserMedia 已开麦克风）离开页面也能被 cancel 释放
+        recorderRef.current = recorder;
         await recorder.start();
       } catch (err) {
+        recorderRef.current = null;
         onError(err instanceof Error ? err.message : "无法开始录音（请检查麦克风权限）");
         return;
       }
-      recorderRef.current = recorder;
-      setPhase("recording");
+      // 自动监听：先进入 listening（等开口），否则直接 recording
+      setPhase(options.autoListen ? "listening" : "recording");
       setSeconds(0);
     },
     async stop() {

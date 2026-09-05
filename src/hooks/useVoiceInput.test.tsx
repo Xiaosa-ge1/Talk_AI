@@ -245,4 +245,57 @@ describe("useVoiceInput", () => {
     });
     expect(capturedSilence?.silenceTimeoutMs).toBeUndefined();
   });
+
+  it("自动监听模式：start 进入 listening，检测到开口转 recording", async () => {
+    let capturedOpts: { speechActivation?: { onSpeechStart?: () => void } } | undefined;
+    const recorder = fakeRecorder();
+    const { result } = renderHook(() =>
+      useVoiceInput({
+        onTranscribed: vi.fn(),
+        onError: vi.fn(),
+        createRecorder: (opts) => {
+          capturedOpts = opts;
+          return recorder;
+        },
+        transcribe: vi.fn(async () => ""),
+        autoListen: true,
+      })
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+    // 自动监听：start 后是 listening，不是 recording
+    expect(result.current.phase).toBe("listening");
+    // 语音激活配置传入，带 onSpeechStart 回调
+    expect(capturedOpts?.speechActivation?.onSpeechStart).toBeTypeOf("function");
+
+    // 模拟录音器检测到开口，触发 onSpeechStart → 转 recording
+    await act(async () => {
+      capturedOpts?.speechActivation?.onSpeechStart?.();
+      await Promise.resolve();
+    });
+    expect(result.current.phase).toBe("recording");
+  });
+
+  it("非自动监听模式：start 直接进入 recording，不传 speechActivation", async () => {
+    let capturedOpts: { speechActivation?: unknown } | undefined;
+    const recorder = fakeRecorder();
+    const { result } = renderHook(() =>
+      useVoiceInput({
+        onTranscribed: vi.fn(),
+        onError: vi.fn(),
+        createRecorder: (opts) => {
+          capturedOpts = opts;
+          return recorder;
+        },
+        transcribe: vi.fn(async () => ""),
+      })
+    );
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.phase).toBe("recording");
+    expect(capturedOpts?.speechActivation).toBeUndefined();
+  });
 });

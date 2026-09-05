@@ -193,6 +193,17 @@ describe("useAssistantSpeech", () => {
     expect(result.current.speakingId).toBeNull();
   });
 
+  it("卸载时自动停止朗读（离开页面声音不残留）", () => {
+    const synth = fakeSynth();
+    const { unmount } = renderHook(() =>
+      useAssistantSpeech({ messages: [], synth, supported: true })
+    );
+    act(() => {
+      unmount();
+    });
+    expect(synth.cancelMock).toHaveBeenCalled();
+  });
+
   it("supported=false 时 speak 为 no-op", () => {
     const synth = fakeSynth();
     const { result } = renderHook(() =>

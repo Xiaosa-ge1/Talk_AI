@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageBubble } from "./MessageBubble";
@@ -47,11 +47,27 @@ export function InterviewPage() {
     },
     onError: (message) => setNotice(message),
     silenceAutoStop: dialogueMode,
+    autoListen: dialogueMode,
   });
   const speech = useAssistantSpeech({
     messages: session?.messages ?? [],
     streaming: phase === "thinking",
   });
+
+  // 对话感模式：面试官回答完成（phase 回到 ready）后，自动进入"监听"待命，
+  // 用户开口即自动录音，无需手动点麦克风。
+  const autoStartRef = useRef(false);
+  useEffect(() => {
+    if (!dialogueMode || !voiceSupported) return;
+    if (phase === "ready" && voice.phase === "idle" && !autoStartRef.current) {
+      autoStartRef.current = true;
+      void voice.start();
+    }
+    if (phase === "thinking") {
+      // 新一轮 AI 生成中，重置标志，等回答完成再次自动监听
+      autoStartRef.current = false;
+    }
+  }, [dialogueMode, voiceSupported, phase, voice.phase, voice.start]);
   if (!session || phase === "loading") {
     return <div className="p-8 text-center text-ink-secondary">加载中…</div>;
   }
@@ -204,9 +220,11 @@ export function InterviewPage() {
                 ? "面试官正在思考…"
                 : voice.phase === "transcribing"
                   ? "正在识别你的语音…"
-                  : voice.phase === "recording"
-                    ? "正在录音，说完点右侧停止"
-                    : "输入或语音作答（可修改后发送）"
+                  : voice.phase === "listening"
+                    ? "我在听，请开始说话…"
+                    : voice.phase === "recording"
+                      ? "正在录音，说完自动结束"
+                      : "输入或语音作答（可修改后发送）"
             }
             rows={1}
             className="max-h-40 flex-1 resize-none rounded-xl border border-border px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none transition-colors placeholder:text-ink-muted focus:border-primary disabled:bg-soft-gray disabled:text-ink-muted"
@@ -226,6 +244,19 @@ export function InterviewPage() {
             <span className="whitespace-nowrap rounded-xl bg-soft-gray px-4 py-2.5 text-[13px] text-ink-secondary">
               识别中…
             </span>
+          )}
+          {voiceSupported && voice.phase === "listening" && (
+            <button
+              type="button"
+              onClick={() => voice.cancel()}
+              title="正在聆听，点击取消"
+              aria-label="取消聆听"
+              className="flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3.5 py-2.5 text-[14px] font-medium text-primary transition-colors hover:bg-primary/10"
+              data-testid="mic-listening"
+            >
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
+              聆听中…
+            </button>
           )}
           {voiceSupported && voice.phase === "idle" && (
             <button

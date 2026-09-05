@@ -77,6 +77,9 @@ export function useAssistantSpeech(options: UseAssistantSpeechOptions): UseAssis
     setSpeakingId(null);
   }, [synth]);
 
+  // 卸载时停止朗读（离开页面不能让 AI 声音继续播到别的页面）
+  useEffect(() => stop, [stop]);
+
   // 首次拿到非空消息时标记历史基线：进入页面不重读已存在的旧提问。
   // null = 尚未标记；"" = 已标记但历史里没有 assistant 消息；其余 = 最后一条历史 AI id
   // 注意：不因 streaming 而推迟标记——开场白是页面加载后才生成的新消息，
