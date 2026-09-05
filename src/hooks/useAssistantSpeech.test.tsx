@@ -138,6 +138,30 @@ describe("useAssistantSpeech", () => {
     expect(utterance.text).toBe("你提到最近一年在带 4 人团队，讲讲那次决策？");
   });
 
+  it("首帧为空消息时，开场白流式生成后应朗读（回归：问好不朗读 bug）", async () => {
+    const synth = fakeSynth();
+    // 开场时序：进入页面 messages=[] 且 streaming=true（AI 正在生成开场白）
+    const { rerender } = renderHook(
+      ({ msgs, streaming }: { msgs: ChatMessage[]; streaming?: boolean }) =>
+        useAssistantSpeech({ messages: msgs, synth, supported: true, streaming }),
+      { initialProps: { msgs: [] as ChatMessage[], streaming: true } }
+    );
+    // AI 生成中：先插入空占位气泡（content 为空，真实时序如此）→ 不朗读
+    const placeholder = assistant("a1", "");
+    rerender({ msgs: [placeholder], streaming: true });
+    await act(async () => {});
+    expect(synth.speakMock).not.toHaveBeenCalled();
+    // 开场白完整落库、streaming 结束 → 应朗读这条开场白
+    rerender({
+      msgs: [assistant("a1", "你好，欢迎参加今天的面试，先做个自我介绍吧")],
+      streaming: false,
+    });
+    await act(async () => {});
+    expect(synth.speakMock).toHaveBeenCalledTimes(1);
+    const utterance = synth.speakMock.mock.calls[0][0] as SpeechSynthesisUtterance;
+    expect(utterance.text).toBe("你好，欢迎参加今天的面试，先做个自我介绍吧");
+  });
+
   it("手动 speak 设置 speakingId，utterance 结束回调后清空", async () => {
     const synth = fakeSynth();
     const { result } = renderHook(() =>

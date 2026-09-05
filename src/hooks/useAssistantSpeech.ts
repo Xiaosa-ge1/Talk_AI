@@ -79,16 +79,17 @@ export function useAssistantSpeech(options: UseAssistantSpeechOptions): UseAssis
 
   // 首次拿到非空消息时标记历史基线：进入页面不重读已存在的旧提问。
   // null = 尚未标记；"" = 已标记但历史里没有 assistant 消息；其余 = 最后一条历史 AI id
-  // streaming 门控：临时会话的开场流式不能被当成"历史基线"（否则开场永不朗读）
+  // 注意：不因 streaming 而推迟标记——开场白是页面加载后才生成的新消息，
+  // 首帧（messages 为空）就应把基线锁定为""，这样开场白生成后被正确识别为"新消息"并朗读。
   const streaming = options.streaming ?? false;
   const lastSpokenRef = useRef<string | null>(null);
   useEffect(() => {
-    if (streaming || lastSpokenRef.current !== null || messages.length === 0) return;
+    if (lastSpokenRef.current !== null || messages.length === 0) return;
     const lastHistoryAi = [...messages]
       .reverse()
       .find((m) => m.role === "assistant" && m.content.trim() !== "");
     lastSpokenRef.current = lastHistoryAi ? lastHistoryAi.id : "";
-  }, [messages, streaming]);
+  }, [messages]);
 
   // 自动朗读：AI 生成结束后发现比基线更新的一条完整 assistant 消息
   useEffect(() => {

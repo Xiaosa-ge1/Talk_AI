@@ -48,14 +48,26 @@ describe("buildIatFrame（帧构造）", () => {
     expect((frame.data as Record<string, unknown>).format).toBe("audio/L16;rate=16000");
   });
 
-  it("中间/尾帧不再带 common 与音频", () => {
+  it("中间/尾帧也必须带 common.app_id（否则讯飞丢帧，长句只识别后半段）", () => {
     const tail = JSON.parse(buildIatFrame({ appId: "app-1", status: 2 })) as Record<
       string,
       unknown
     >;
-    expect(tail.common).toBeUndefined();
+    // 关键回归：尾帧必须有 common.app_id
+    expect(tail.common).toEqual({ app_id: "app-1" });
+    // 尾帧不带 business（business 只在首帧）
+    expect(tail.business).toBeUndefined();
     expect((tail.data as Record<string, unknown>).status).toBe(2);
     expect((tail.data as Record<string, unknown>).audio).toBeUndefined();
+
+    // 中间帧同理
+    const mid = JSON.parse(
+      buildIatFrame({ appId: "app-1", status: 1, audioB64: "QUJD" })
+    ) as Record<string, unknown>;
+    expect(mid.common).toEqual({ app_id: "app-1" });
+    expect(mid.business).toBeUndefined();
+    expect((mid.data as Record<string, unknown>).status).toBe(1);
+    expect((mid.data as Record<string, unknown>).audio).toBe("QUJD");
   });
 });
 
@@ -117,13 +129,13 @@ describe("XfyunIatClient.transcribe（注入 fake WebSocket）", () => {
     makeFakeWs();
   });
 
-  it("连接后按序发送首帧(status0)→尾帧(status2)，收到 status2 结果返回文本", async () => {
+  it("连接后连发首帧(status0)→尾帧(status2)，收到 status2 结果返回文本", async () => {
     const c = client();
     const p = c.transcribe(new Blob([new Uint8Array(2000)], { type: "audio/pcm" }));
     await new Promise((r) => setTimeout(r, 0));
     ws.onopen?.();
     await new Promise((r) => setTimeout(r, 0));
-    // 2000B < 40KB → 一帧音频 + 尾帧
+    // 2000B < 40KB → 一帧音频 + 尾帧，连发
     expect(ws.sent).toHaveLength(2);
     const first = JSON.parse(ws.sent[0]) as { data: { status: number } };
     expect(first.data.status).toBe(0);
@@ -139,7 +151,7 @@ describe("XfyunIatClient.transcribe（注入 fake WebSocket）", () => {
     await expect(p).resolves.toBe("识别出的回答");
   });
 
-  it("超过单帧大小会分帧发送（中间帧 status1）", async () => {
+  it("长音频分帧：每一帧（含中间帧/尾帧）都带 common.app_id", async () => {
     const c = client();
     // 100KB 音频 → 3 帧数据（40KB×2 + 20KB）+ 尾帧
     const p = c.transcribe(new Blob([new Uint8Array(100 * 1024)], { type: "audio/pcm" }));
@@ -147,10 +159,15 @@ describe("XfyunIatClient.transcribe（注入 fake WebSocket）", () => {
     ws.onopen?.();
     await new Promise((r) => setTimeout(r, 0));
     expect(ws.sent).toHaveLength(4);
+    // 每帧 status 正确
     expect(JSON.parse(ws.sent[0]).data.status).toBe(0);
     expect(JSON.parse(ws.sent[1]).data.status).toBe(1);
     expect(JSON.parse(ws.sent[2]).data.status).toBe(1);
     expect(JSON.parse(ws.sent[3]).data.status).toBe(2);
+    // 关键回归：每一帧都必须带 common.app_id（否则讯飞丢帧）
+    for (const s of ws.sent) {
+      expect(JSON.parse(s).common).toEqual({ app_id: "app-1" });
+    }
     ws.onmessage?.({
       data: JSON.stringify({
         code: 0,
@@ -158,6 +175,30 @@ describe("XfyunIatClient.transcribe（注入 fake WebSocket）", () => {
       }),
     });
     await p;
+  });
+
+  it("累积多个返回帧的识别文本（回归：长句只识别后半句 bug）", async () => {
+    const c = client();
+    const p = c.transcribe(new Blob([new Uint8Array(2000)], { type: "audio/pcm" }));
+    await new Promise((r) => setTimeout(r, 0));
+    ws.onopen?.();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // 讯飞流式会分多帧返回：status=0 中间结果 + status=2 最终结果
+    ws.onmessage?.({
+      data: JSON.stringify({
+        code: 0,
+        data: { status: 0, result: { ws: [{ cw: [{ w: "我负责推荐系统的产品化" }] }] } },
+      }),
+    });
+    ws.onmessage?.({
+      data: JSON.stringify({
+        code: 0,
+        data: { status: 2, result: { ws: [{ cw: [{ w: "，点击率提升了二十五个百分点" }] }] } },
+      }),
+    });
+    // 关键：必须把 status=0 和 status=2 两帧的文本都拼起来，而不是只取 status=2
+    await expect(p).resolves.toBe("我负责推荐系统的产品化，点击率提升了二十五个百分点");
   });
 
   it("服务端 error（code!=0）→ AsrError(failed)", async () => {

@@ -80,7 +80,7 @@ export function extractIatText(frame: unknown): string {
     .join("");
 }
 
-/** 构造发送帧（首帧带 common/business；status 0 首 / 1 中 / 2 尾） */
+/** 构造发送帧（首帧带 common+business；中间/尾帧也必须带 common.app_id，否则服务端会丢帧） */
 export function buildIatFrame(params: {
   appId: string;
   status: 0 | 1 | 2;
@@ -92,9 +92,13 @@ export function buildIatFrame(params: {
     data.encoding = "raw";
     data.audio = params.audioB64;
   }
-  const frame: Record<string, unknown> = { data };
+  // common.app_id 每一帧都必须带（讯飞 iat v2 协议：中间帧/尾帧缺 app_id 会被丢弃）
+  const frame: Record<string, unknown> = {
+    common: { app_id: params.appId },
+    data,
+  };
+  // business 只需在首帧携带（后续帧可省）
   if (params.status === 0) {
-    frame.common = { app_id: params.appId };
     frame.business = { language: "zh_cn", domain: "iat", accent: "mandarin", ptt: 1 };
   }
   return JSON.stringify(frame);
@@ -157,7 +161,9 @@ export class XfyunIatClient implements AsrClient {
             finish(new AsrError("empty", "没有录音内容"));
             return;
           }
-          // 逐帧发送：首帧 status0 → 中间 status1 → 尾帧 status2
+          // 逐帧发送：首帧 status0 → 中间 status1 → 尾帧 status2。
+          // 每一帧（含中间帧/尾帧）都必须带 common.app_id（见 buildIatFrame），
+          // 否则服务端会丢弃缺 app_id 的帧。
           for (let offset = 0; offset < bytes.length; offset += FRAME_BYTES) {
             const chunk = bytes.subarray(offset, Math.min(offset + FRAME_BYTES, bytes.length));
             const b64 = Buffer.from(chunk).toString("base64");
@@ -170,6 +176,9 @@ export class XfyunIatClient implements AsrClient {
         })().catch(() => finish(new AsrError("failed", "音频处理失败")));
       };
 
+      // 累积所有返回帧的识别文本（讯飞流式会分多帧返回：status=0/1 中间结果 + status=2 最终结果，
+      // 只取 status=2 会丢掉前面一大段，导致长句只剩后半句）
+      let fullText = "";
       ws.onmessage = (ev) => {
         let frame: { code?: unknown; message?: unknown; data?: { status?: unknown } };
         try {
@@ -183,9 +192,9 @@ export class XfyunIatClient implements AsrClient {
           );
           return;
         }
-        const text = extractIatText(frame);
+        fullText += extractIatText(frame);
         if (frame.data?.status === 2) {
-          const trimmed = text.trim();
+          const trimmed = fullText.trim();
           if (!trimmed) finish(new AsrError("empty", "没有识别到语音内容，请再说一遍"));
           else finish(null, trimmed);
         }
